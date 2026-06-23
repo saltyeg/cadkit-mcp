@@ -10,13 +10,14 @@ This roadmap is ordered so that **correctness and robustness of the parametric c
 before feature breadth** — a wide tool that emits under-defined or non-parametric geometry
 would betray the thesis. Reorder freely; the tiers are a recommendation, not a contract.
 
-## Current state (15 tools)
+## Current state (27 tools — P0–P2 shipped)
 - Document/part-studio: `cad_document_create`, `cad_part_studio_create`
 - Sketch session: `cad_sketch_begin` → `line`/`circle`/`rectangle`/`polyline` → `constrain`/`dimension` → `close`
-- Variables: `cad_set_variable`
-- Features: `cad_extrude`, `cad_fillet`
+- Variables: `cad_set_variable`, `cad_get_variables`
+- Features: `cad_extrude`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole`, `cad_revolve`, `cad_mirror`, `cad_pattern`
+- Inspection / lifecycle / I/O: `cad_measure`, `cad_delete_feature`, `cad_suppress`, `cad_edit_feature`, `cad_export`
 - Semantic selection: `cad_find_edges` (circular/concave/convex/linear), `cad_find_faces` (planar-by-normal/cylindrical)
-- Dev tooling: `cadkit_mcp/devkit.py` (quota-frugal verification helpers)
+- Dev tooling: `cadkit_mcp/devkit.py` (quota-frugal verification helpers); on-demand live smokes in `scripts/`
 
 Verified working: variable-driven dimensions drive the solid (a sketch drawn at the wrong
 size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-cut holes.
@@ -77,15 +78,23 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
 9. **`cad_revolve`** ✅ *shipped & verified* (region + axis edge; `angle` or full 360) and
    **`cad_shell`** ✅ *shipped & verified* (remove faces + inward `thickness`).
 
-## P2 — Inspection, lifecycle, I/O
+## P2 — Inspection, lifecycle, I/O  *(shipped & live-verified — `scripts/smoke_p2.py`)*
 
-10. **`cad_measure`** built on `devkit.measure_fs` — bbox, volume, mass, center of mass,
-    point/edge/face distances — in a *single* eval.
-11. **Feature lifecycle** — `cad_delete_feature`, `cad_suppress`, `cad_rollback`, and
-    `cad_edit_feature` (change a stored parameter, e.g. retarget a dimension to a `#variable`).
-12. **`cad_export`** (STL/STEP) for the part studio.
-13. **`cad_get_variables`** / list — read the variable table back (FeatureScript `getVariable`,
-    since the `/variables` REST endpoint 404s on this tier).
+10. **`cad_measure`** ✅ *shipped* — built on `devkit.measure_fs`: solid count, total volume,
+    and combined bounding box (min/max/size, inches) in a **single** eval. *Deferred:* mass /
+    center of mass (need the `/massproperties` REST endpoint — no material density is set today)
+    and point/edge/face distance (needs deterministic-id → query plumbing).
+11. **Feature lifecycle** — `cad_delete_feature` ✅, `cad_suppress` ✅ (flip `suppressed`,
+    update in place), `cad_edit_feature` ✅ (retarget one stored parameter — proven by editing an
+    extrude depth and watching the measured volume double). **`cad_rollback` deferred** — the
+    rollback bar is set via a distinct endpoint (`rollbackBarIndex`) not yet wrapped; lower value
+    than the rest, do it spec-first later.
+12. **`cad_export`** ✅ *shipped* — wraps the v11 translation endpoint (STL/STEP/PARASOLID/GLTF/
+    OBJ; optional `partId`). Returns the async translation request (state `ACTIVE`); polling the
+    translation to completion/download is a follow-up.
+13. **`cad_get_variables`** ✅ *shipped* — lists name + **authored expression** by scanning the
+    `assignVariable` features (one API call, unit-faithful — avoids the metre/inch ambiguity of
+    resolving `getVariable`, and the `/variables` REST endpoint 404s on this tier anyway).
 
 ## P3 — Selection & ergonomics
 

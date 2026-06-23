@@ -32,15 +32,16 @@ A few hard-won principles are baked into the tools (the full list is in [PLAN.md
   chosen by geometry (concave edges for fillets, a cylindrical face by radius), so a feature
   keeps referring to the right thing after the model changes.
 
-## The cadkit tools (21)
+## The cadkit tools (27)
 
 | Group | Tools |
 |---|---|
 | **Document / studio** | `cad_document_create`, `cad_part_studio_create` |
 | **Sketch session** | `cad_sketch_begin` → `cad_sketch_line` · `cad_sketch_circle` · `cad_sketch_rectangle` · `cad_sketch_polyline` → `cad_sketch_constrain` · `cad_sketch_dimension` → `cad_sketch_close` |
-| **Variables** | `cad_set_variable` (update-or-create; no duplicates) |
+| **Variables** | `cad_set_variable` (update-or-create; no duplicates), `cad_get_variables` |
 | **Features** | `cad_extrude`, `cad_revolve`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole` |
 | **Pattern / mirror** | `cad_mirror`, `cad_pattern` (linear + circular) — *feature-based*: repeat whole features, not faces |
+| **Inspection / lifecycle / I/O** | `cad_measure` (count/volume/bbox in one eval), `cad_delete_feature`, `cad_suppress`, `cad_edit_feature`, `cad_export` (STL/STEP/…) |
 | **Semantic selection** | `cad_find_edges` (circular / concave / linear), `cad_find_faces` (planar-by-normal / cylindrical) |
 
 A sketch is one session: `cad_sketch_begin(plane=… | face=<id>)`, add entities, add geometric
@@ -143,10 +144,13 @@ PLAN.md           # cadkit thesis + roadmap (P0–P3)
 ## Roadmap
 
 cadkit is ordered so the **parametric core is correct before feature breadth** — see
-[PLAN.md](PLAN.md). Shipped: the sketch session, idempotent variables, parametric scalars
-everywhere, extrude/revolve/fillet/chamfer/shell/hole, sketch-on-face, feature-based
-pattern/mirror, and semantic edge/face selection. Next (P2): `cad_measure`, feature lifecycle
-(delete / suppress / rollback / edit), STL/STEP export, and reading the variable table back.
+[PLAN.md](PLAN.md). Shipped (P0–P2): the sketch session, idempotent variables, parametric
+scalars everywhere, extrude/revolve/fillet/chamfer/shell/hole, sketch-on-face, feature-based
+pattern/mirror, semantic edge/face selection, plus inspection/lifecycle/IO — `cad_measure`,
+`cad_get_variables`, `cad_delete_feature`, `cad_suppress`, `cad_edit_feature`, `cad_export`.
+Next (P3): richer semantic selection (by area/position/adjacency) and sketch ergonomics
+(slots, in-sketch arcs/fillets, construction geometry). Deferred: `cad_rollback`, mass/COM in
+`cad_measure`, and the native counterbore/countersink Hole feature.
 
 ## Credits
 

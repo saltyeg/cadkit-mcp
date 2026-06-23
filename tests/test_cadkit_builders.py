@@ -159,3 +159,44 @@ def test_mirror_is_feature_based():
     assert "faces" not in p
     assert p["instanceFunction"]["featureIds"] == ["FEXT1"]
     assert p["mirrorPlane"]["queries"][0]["deterministicIds"] == ["JEC"]
+
+
+# ---- P2 pure helpers ------------------------------------------------------
+def test_scan_variables_reads_name_and_expression():
+    # round-trip: the assignVariable JSON cad_set_variable emits must read back cleanly
+    feat = S._assign_variable_json("leg", "#base*2", "FV1")["feature"]  # featureType set by builder
+    others = [{"featureType": "extrude", "parameters": []}]
+    vs = S._scan_variables([feat] + others)
+    assert vs == [{"name": "leg", "expression": "#base*2", "featureId": "FV1"}]
+
+
+def test_apply_param_edit_retargets_expression():
+    j = S._extrude_json("FSK", "0.5 in", "NEW", "x")["feature"]
+    S._apply_param_edit(j, "depth", expression="#width")
+    depth = [p for p in j["parameters"] if p["parameterId"] == "depth"][0]
+    assert depth["expression"] == "#width"
+
+
+def test_apply_param_edit_sets_value_and_raises_on_missing():
+    j = S._revolve_json("F", "E2", 90, "NEW", "r")["feature"]
+    S._apply_param_edit(j, "operationType", value="REMOVE")
+    op = [p for p in j["parameters"] if p["parameterId"] == "operationType"][0]
+    assert op["value"] == "REMOVE"
+    try:
+        S._apply_param_edit(j, "nope", expression="1 in")
+        assert False, "expected KeyError on missing parameter"
+    except KeyError:
+        pass
+
+
+def test_measure_summary_shapes_bbox_and_size():
+    parsed = {"solidCount": 2, "solidVolume": 1.25,
+              "solidMin": [0, 0, 0], "solidMax": [2, 1, 0.5]}
+    out = S._measure_summary(parsed)
+    assert out["solidCount"] == 2 and out["volume"] == 1.25
+    assert out["bbox"]["size"] == [2, 1, 0.5]
+
+
+def test_measure_summary_handles_empty_studio():
+    out = S._measure_summary({"solidCount": 0})
+    assert out["solidCount"] == 0 and "bbox" not in out

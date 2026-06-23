@@ -15,8 +15,10 @@ from onshape_mcp.api.client import OnshapeClient, OnshapeCredentials
 from onshape_mcp.api.partstudio import PartStudioManager
 from onshape_mcp.api.featurescript import FeatureScriptManager
 from onshape_mcp.api.documents import DocumentManager
+from onshape_mcp.api.export import ExportManager
 
 from .sketch import SketchSession, PLANES
+from .devkit import measure_fs, parse_fs
 from . import selection as sel
 
 def _load_creds() -> OnshapeCredentials:
@@ -41,6 +43,7 @@ client = OnshapeClient(_load_creds())
 PS = PartStudioManager(client)
 FS = FeatureScriptManager(client)
 DOCS = DocumentManager(client)
+EXPORT = ExportManager(client)
 
 SESSIONS: Dict[str, SketchSession] = {}
 # (doc, ws, elem) -> {variable name: featureId}. Lets cad_set_variable update an existing
@@ -85,6 +88,54 @@ def _feat_result(r: Dict[str, Any], **extra) -> List[TextContent]:
     # every feature tool returns its new featureId so it can be fed to pattern/mirror/fillet/etc.
     return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus"),
                             "featureId": r.get("feature", {}).get("featureId"), **extra}))
+
+
+# ---- P2 pure helpers (offline-testable; no API) ---------------------------
+def _scan_variables(features: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+    """Pull cadkit-authored variables out of a feature list: name + authored expression.
+
+    cad_set_variable stores each variable as an `assignVariable` feature — the name in the
+    `name` string param, the expression in the `anyValue` quantity param. Reading the
+    expression back is exact and unit-faithful (no metre/inch conversion guesswork)."""
+    out = []
+    for f in features:
+        if f.get("featureType") != "assignVariable":
+            continue
+        params = f.get("parameters", [])
+        name = next((p.get("value") for p in params if p.get("parameterId") == "name"), None)
+        expr = next((p.get("expression") for p in params if p.get("parameterId") == "anyValue"), None)
+        if name:
+            out.append({"name": name, "expression": expr, "featureId": f.get("featureId")})
+    return out
+
+
+def _apply_param_edit(feature: Dict[str, Any], parameter_id: str,
+                      expression: Optional[str] = None, value: Optional[Any] = None) -> Dict[str, Any]:
+    """Mutate one stored parameter in a fetched feature, in place, and return it.
+
+    `expression` retargets a quantity param (a dimension, a depth — '#var' or '0.5 in');
+    `value` sets an enum/bool/string param. Raises if the parameter isn't present so the
+    caller fails loudly instead of silently no-op'ing."""
+    for p in feature.get("parameters", []):
+        if p.get("parameterId") == parameter_id:
+            if expression is not None:
+                p["expression"] = expression
+            if value is not None:
+                p["value"] = value
+            return feature
+    raise KeyError(f"parameter '{parameter_id}' not found on feature "
+                   f"'{feature.get('name', feature.get('featureId'))}'")
+
+
+def _measure_summary(parsed: Dict[str, Any]) -> Dict[str, Any]:
+    """Shape a measure_fs eval result into {count, volume, bbox{min,max,size}} (inches)."""
+    count = parsed.get("solidCount")
+    out: Dict[str, Any] = {"solidCount": count}
+    if parsed.get("solidMin") and parsed.get("solidMax"):
+        lo, hi = parsed["solidMin"], parsed["solidMax"]
+        out["volume"] = parsed.get("solidVolume")
+        out["bbox"] = {"min": lo, "max": hi, "size": [hi[i] - lo[i] for i in range(3)]}
+    return out
 
 def _scalar_expr(value, unit: str = "in") -> str:
     """A scalar parameter as an Onshape expression: a number (in `unit`) or a raw
@@ -339,6 +390,32 @@ async def list_tools() -> List[Tool]:
                           "spacing": {"type": ["number", "string"]}, "angle": {"type": ["number", "string"]},
                           "count": {"type": ["integer", "string"]}, "name": {"type": "string"}},
                           "required": ["documentId","workspaceId","elementId","kind","featureIds","count"]}),
+        # ---- P2: inspection, lifecycle, I/O ----
+        Tool(name="cad_measure", description="Measure the part studio's solids in ONE FeatureScript eval: solid count, "
+             "total volume (in^3), and the combined bounding box (min/max/size in inches). Quota-frugal.",
+             inputSchema={"type": "object", "properties": {**ds}, "required": ["documentId","workspaceId","elementId"]}),
+        Tool(name="cad_get_variables", description="List the cadkit variables in this part studio (name + authored "
+             "expression, e.g. '#leg' = '2 in'). Reads the assignVariable features; one API call.",
+             inputSchema={"type": "object", "properties": {**ds}, "required": ["documentId","workspaceId","elementId"]}),
+        Tool(name="cad_delete_feature", description="Delete a feature by featureId.",
+             inputSchema={"type": "object", "properties": {**ds, "featureId": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId","featureId"]}),
+        Tool(name="cad_suppress", description="Suppress (suppressed=true) or unsuppress (false) a feature by featureId, "
+             "leaving it in the tree.",
+             inputSchema={"type": "object", "properties": {**ds, "featureId": {"type": "string"},
+                          "suppressed": {"type": "boolean"}},
+                          "required": ["documentId","workspaceId","elementId","featureId","suppressed"]}),
+        Tool(name="cad_edit_feature", description="Edit one stored parameter of an existing feature. Give parameterId "
+             "(e.g. 'depth','radius','length') plus expression (number/#var for a quantity) OR value (enum/bool/string). "
+             "Retarget a dimension to a #variable without rebuilding.",
+             inputSchema={"type": "object", "properties": {**ds, "featureId": {"type": "string"},
+                          "parameterId": {"type": "string"}, "expression": {"type": ["number","string"]},
+                          "value": {}},
+                          "required": ["documentId","workspaceId","elementId","featureId","parameterId"]}),
+        Tool(name="cad_export", description="Export the part studio to a file format. format: STL/STEP/PARASOLID/GLTF/OBJ "
+             "(default STEP). Optional partId to export a single part. Returns the translation result.",
+             inputSchema={"type": "object", "properties": {**ds, "format": {"type": "string"}, "partId": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId"]}),
     ]
 
 @server.call_tool()
@@ -500,6 +577,48 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                                            a.get("angle", 360), a.get("name", "Pattern"))
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"], j)
             return _feat_result(r)
+
+        # ---- P2: inspection, lifecycle, I/O ----
+        if name == "cad_measure":
+            res = await FS.evaluate(a["documentId"], a["workspaceId"], a["elementId"], measure_fs())
+            parsed = parse_fs(res.get("result", res))
+            return _txt(json.dumps(_measure_summary(parsed)))
+
+        if name == "cad_get_variables":
+            feats = await PS.get_features(a["documentId"], a["workspaceId"], a["elementId"])
+            return _txt(json.dumps({"variables": _scan_variables(feats.get("features", []))}))
+
+        if name == "cad_delete_feature":
+            await PS.delete_feature(a["documentId"], a["workspaceId"], a["elementId"], a["featureId"])
+            _VAR_CACHE.pop((a["documentId"], a["workspaceId"], a["elementId"]), None)  # tree changed
+            return _txt(json.dumps({"status": "deleted", "featureId": a["featureId"]}))
+
+        if name == "cad_suppress":
+            feats = await PS.get_features(a["documentId"], a["workspaceId"], a["elementId"])
+            feat = next((f for f in feats.get("features", []) if f.get("featureId") == a["featureId"]), None)
+            if feat is None:
+                return _txt(json.dumps({"error": f"feature {a['featureId']} not found"}))
+            feat["suppressed"] = bool(a["suppressed"])
+            r = await PS.update_feature(a["documentId"], a["workspaceId"], a["elementId"],
+                                        a["featureId"], {"feature": feat})
+            return _feat_result(r, suppressed=bool(a["suppressed"]))
+
+        if name == "cad_edit_feature":
+            feats = await PS.get_features(a["documentId"], a["workspaceId"], a["elementId"])
+            feat = next((f for f in feats.get("features", []) if f.get("featureId") == a["featureId"]), None)
+            if feat is None:
+                return _txt(json.dumps({"error": f"feature {a['featureId']} not found"}))
+            expr = a.get("expression")
+            expr = _scalar_expr(expr) if isinstance(expr, (int, float)) else expr
+            _apply_param_edit(feat, a["parameterId"], expression=expr, value=a.get("value"))
+            r = await PS.update_feature(a["documentId"], a["workspaceId"], a["elementId"],
+                                        a["featureId"], {"feature": feat})
+            return _feat_result(r)
+
+        if name == "cad_export":
+            r = await EXPORT.export_part_studio(a["documentId"], a["workspaceId"], a["elementId"],
+                                                a.get("format", "STEP"), a.get("partId"))
+            return _txt(json.dumps(r) if isinstance(r, (dict, list)) else json.dumps({"result": str(r)}))
 
         return _txt(f"ERROR: unknown tool {name}")
     except Exception as e:
