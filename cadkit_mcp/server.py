@@ -359,10 +359,13 @@ async def list_tools() -> List[Tool]:
                           "required": ["documentId","workspaceId","elementId","edgeIds","distance"]}),
         Tool(name="cad_hole", description="Cut cylindrical hole(s): circles at the given centers on a plane/face, removed "
              "by a blind extrude. diameter/depth accept numbers or #variables. plane is Front/Top/Right OR a face id "
-             "(from cad_find_faces).",
+             "(from cad_find_faces). style='counterbore' adds a wider, shallow recess (needs cboreDiameter + cboreDepth) "
+             "for a bolt head; default style='simple'.",
              inputSchema={"type": "object", "properties": {**ds, "plane": {"type": "string"},
                           "centers": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
                           "diameter": {"type": ["number", "string"]}, "depth": {"type": ["number", "string"]},
+                          "style": {"type": "string", "enum": ["simple", "counterbore"]},
+                          "cboreDiameter": {"type": ["number", "string"]}, "cboreDepth": {"type": ["number", "string"]},
                           "name": {"type": "string"}},
                           "required": ["documentId","workspaceId","elementId","plane","centers","diameter","depth"]}),
         Tool(name="cad_revolve", description="Revolve a sketch region about an axis edge. angle in degrees (number/#var); "
@@ -539,17 +542,34 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             return _feat_result(r)
 
         if name == "cad_hole":
-            # circles at the centers on the plane/face, then a blind REMOVE extrude
-            sk = SketchSession(a["documentId"], a["workspaceId"], a["elementId"],
-                               a["plane"], a.get("name", "Hole") + " sketch")
-            for c in a["centers"]:
-                cid = sk.add_circle(tuple(c), 0.5)            # radius refined by the diameter dim
-                sk.dim_diameter(cid, a["diameter"])
-            rs = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"], sk.build())
-            sfid = rs["feature"]["featureId"]
-            re = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
-                _extrude_json(sfid, a["depth"], "REMOVE", a.get("name", "Hole")))
-            return _feat_result(re, sketchFeatureId=sfid)
+            # A hole = one or more coaxial REMOVE cuts on the same plane/face. A counterbore is the
+            # bore (narrow, full depth) plus a wider, shallow cut — composed from cadkit's verified
+            # primitives rather than Onshape's native (versioned, ~150-param) Hole feature.
+            doc, ws, elem = a["documentId"], a["workspaceId"], a["elementId"]
+            plane, centers, nm = a["plane"], a["centers"], a.get("name", "Hole")
+            style = a.get("style", "simple")
+
+            async def _drill(dia, depth, sub):
+                sk = SketchSession(doc, ws, elem, plane, f"{nm} {sub} sketch")
+                for c in centers:
+                    cid = sk.add_circle(tuple(c), 0.5)        # radius refined by the diameter dim
+                    sk.dim_diameter(cid, dia)
+                rs = await PS.add_feature(doc, ws, elem, sk.build())
+                sfid = rs["feature"]["featureId"]
+                re = await PS.add_feature(doc, ws, elem,
+                    _extrude_json(sfid, depth, "REMOVE", f"{nm} {sub}"))
+                return sfid, re.get("featureState", {}).get("featureStatus"), re["feature"]["featureId"]
+
+            sfid, status, fid = await _drill(a["diameter"], a["depth"], "bore")
+            out = {"status": status, "featureId": fid, "sketchFeatureId": sfid}
+            if style == "counterbore":
+                if not (a.get("cboreDiameter") and a.get("cboreDepth")):
+                    return _txt(json.dumps({"error": "style=counterbore needs cboreDiameter + cboreDepth"}))
+                _, cstatus, _ = await _drill(a["cboreDiameter"], a["cboreDepth"], "cbore")
+                out["counterbore"] = cstatus
+            elif style != "simple":
+                return _txt(json.dumps({"error": f"unknown hole style '{style}' (simple|counterbore)"}))
+            return _txt(json.dumps(out))
 
         if name == "cad_revolve":
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],

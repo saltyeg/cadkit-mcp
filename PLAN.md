@@ -57,17 +57,20 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
 
 ## P1 — Features needed for real parts
 
-5. **`cad_hole`** ✅ *shipped (minimal)* — circles at given centers on a plane/face + a blind
-   `REMOVE` extrude; diameter/depth accept `#variable`; multiple centers per call. Today a
-   through-all hole = `depth` past the far face. **Next: counterbore / countersink** via the
-   native Onshape `hole` feature. Its spec is huge/versioned (~150 params: V2/V3 duplicates,
-   per-quantity tolerance bounds, lookup tables) — but only ~12 matter, recovered spec-first from
-   the user's reference (`featureType:"hole"`, `holeVersion=V3`, `styleV2=HoleStyle.C_BORE` |
-   `SIMPLE` | `C_SINK`, `holeDiameterV3`, `cBoreDiameterV3`/`cBoreDepthV3`,
-   `cSinkDiameterV3`/`cSinkAngleV3`, `endStyleV2=BLIND/THROUGH`, `holeDepthV3`, `locations` +
-   `scope` queries). Plan: a `cad_hole(style="simple|counterbore|countersink", …)` that emits the
-   native feature with those params and leaves the tolerance/tap machinery at defaults. Tapped
-   threads are a later add. Keep the simple circle-extrude path as a fallback.
+5. **`cad_hole`** ✅ *shipped — simple + counterbore* — circles at given centers on a plane/face +
+   a blind `REMOVE` extrude; diameter/depth accept `#variable`; multiple centers per call.
+   `style="counterbore"` adds a second wider/shallow coaxial cut (needs `cboreDiameter` +
+   `cboreDepth`) — a **composite** counterbore built from cadkit's verified primitives, confirmed
+   live (`scripts/smoke_counterbore.py`: bore r=0.125 + cbore r=0.3).
+   - **Countersink: TODO** — same composite idea (bore + a chamfer on the mouth edge; equal-distance
+     chamfer ≈ 90° countersink). Needs the circular mouth edge found via `cad_find_edges`.
+   - **Native Onshape `hole` feature: deferred / blocked.** Would give one editable feature with
+     proper hole callouts (drawings/BOM) + tapped threads. Spec recovered (`holeVersion=V3`,
+     `styleV2=HoleStyle.C_BORE|SIMPLE|C_SINK`, `cBore*V3`/`cSink*V3`, `locations` = sketch-point
+     vertices, `scope`), and `sketch.add_point` + `selection.fs_sketch_vertices` exist to feed it —
+     but the posted feature regenerates to **ERROR even with the full known-good param set**, and
+     the REST API does not surface the error reason. Next attempt needs the error read from the
+     Onshape UI (build it by hand, inspect), not blind iteration.
 6. **`cad_chamfer`** ✅ *shipped & verified* — equal-distance; `distance` accepts `#variable`.
    Two-distance / distance-angle still to add (the builder already carries the extra spec params).
 7. **Sketch on a face / offset plane.** ✅ *shipped & verified* — `cad_sketch_begin(face=<id>)`

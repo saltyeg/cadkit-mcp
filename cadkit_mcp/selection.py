@@ -109,3 +109,15 @@ def fs_cylindrical_faces(radius_in: Optional[float], tol_in: float = 0.001) -> s
   }}
   return out;
 }}"""
+
+
+def fs_sketch_vertices(sketch_fid: str) -> str:
+    """Deterministic ids of the point/vertex entities a sketch created — the native Hole
+    feature's `locations` are sketch points."""
+    return f"""function(context is Context, queries){{
+  var out = [];
+  for (var v in evaluateQuery(context, qCreatedBy(makeId("{sketch_fid}"), EntityType.VERTEX))){{
+    out = append(out, transientQueriesToStrings(v));
+  }}
+  return out;
+}}"""

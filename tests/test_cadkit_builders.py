@@ -42,6 +42,14 @@ def test_diagnostics_wellformed_when_grounded_and_dimensioned():
     assert d["grounded"] and d["dimensions"] == 1 and d["wellFormed"]
 
 
+def test_add_point_emits_sketch_point_in_meters():
+    s = _session()
+    pid = s.add_point((1.0, 0.5))
+    pt = [e for e in s.entities if e.get("entityId") == pid][0]
+    assert pt["btType"].startswith("BTMSketchPoint")
+    assert abs(pt["x"] - 1.0 * 0.0254) < 1e-9 and abs(pt["y"] - 0.5 * 0.0254) < 1e-9
+
+
 def test_circle_arcs_tied_equal_so_one_dim_drives_whole_circle():
     # REGRESSION: a circle is two semicircle arcs; without an EQUAL tying them, a single
     # diameter/radius dim binds only the .a arc and the .b arc floats to the placeholder ->

@@ -87,6 +87,14 @@ class SketchSession:
             [self._str(f"{cid}.a", "localFirst"), self._str(f"{cid}.b", "localSecond")]))
         return cid
 
+    def add_point(self, at: Tuple[float, float], construction: bool = False) -> str:
+        """A standalone sketch point — used as a hole `locations` target (native Hole feature)."""
+        px, py = at
+        pid = self._id("pt")
+        self.entities.append({"btType": "BTMSketchPoint-158", "entityId": pid,
+                              "x": px * IN, "y": py * IN, "isConstruction": construction})
+        return pid
+
     def add_rectangle(self, corner1, corner2):
         """Convenience: 4 lines + a full geometric-constraint set (origin NOT grounded)."""
         x1, y1 = corner1; x2, y2 = corner2
