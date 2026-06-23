@@ -81,6 +81,11 @@ def _new_session_id() -> str:
 def _txt(s: str) -> List[TextContent]:
     return [TextContent(type="text", text=s)]
 
+def _feat_result(r: Dict[str, Any], **extra) -> List[TextContent]:
+    # every feature tool returns its new featureId so it can be fed to pattern/mirror/fillet/etc.
+    return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus"),
+                            "featureId": r.get("feature", {}).get("featureId"), **extra}))
+
 def _scalar_expr(value, unit: str = "in") -> str:
     """A scalar parameter as an Onshape expression: a number (in `unit`) or a raw
     expression / #variable passed through (e.g. 1.5 -> '1.5 in'; '#width' -> '#width')."""
@@ -430,12 +435,12 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         if name == "cad_extrude":
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
                 _extrude_json(a["sketchFeatureId"], a["depth"], a.get("operation", "NEW"), a.get("name", "Extrude")))
-            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+            return _feat_result(r)
 
         if name == "cad_fillet":
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
                 _fillet_json(a["edgeIds"], a["radius"], a.get("name", "Fillet")))
-            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+            return _feat_result(r)
 
         if name == "cad_find_edges":
             kind = a["kind"]; tol = a.get("tolerance", 0.001)
@@ -454,7 +459,7 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         if name == "cad_chamfer":
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
                 _chamfer_json(a["edgeIds"], a["distance"], a.get("name", "Chamfer")))
-            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+            return _feat_result(r)
 
         if name == "cad_hole":
             # circles at the centers on the plane/face, then a blind REMOVE extrude
@@ -467,25 +472,24 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             sfid = rs["feature"]["featureId"]
             re = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
                 _extrude_json(sfid, a["depth"], "REMOVE", a.get("name", "Hole")))
-            return _txt(json.dumps({"sketchFeatureId": sfid,
-                                    "status": re.get("featureState", {}).get("featureStatus")}))
+            return _feat_result(re, sketchFeatureId=sfid)
 
         if name == "cad_revolve":
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
                 _revolve_json(a["sketchFeatureId"], a["axisId"], a.get("angle"),
                               a.get("operation", "NEW"), a.get("name", "Revolve")))
-            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+            return _feat_result(r)
 
         if name == "cad_shell":
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
                 _shell_json(a["faceIds"], a["thickness"], a.get("name", "Shell")))
-            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+            return _feat_result(r)
 
         if name == "cad_mirror":
             pid = PLANES.get(a["planeId"], a["planeId"])     # accept Front/Top/Right or a face id
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
                 _mirror_json(a["featureIds"], pid, a.get("name", "Mirror")))
-            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+            return _feat_result(r)
 
         if name == "cad_pattern":
             if a["kind"] == "linear":
@@ -495,7 +499,7 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 j = _circular_pattern_json(a["featureIds"], a["axisId"], a["count"],
                                            a.get("angle", 360), a.get("name", "Pattern"))
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"], j)
-            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+            return _feat_result(r)
 
         return _txt(f"ERROR: unknown tool {name}")
     except Exception as e:
