@@ -56,15 +56,23 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
 
 ## P1 — Features needed for real parts
 
-5. **Proper `cad_hole`** (simple/counterbore/countersink/tapped, through-all or blind) instead
-   of hand-rolled REMOVE extrudes — positioned by sketch points, sized by `#variable`.
-6. **`cad_chamfer`** (equal-distance / two-distance / distance-angle), mirroring `cad_fillet`.
-7. **Sketch on a face / offset plane.** Today sketches are limited to Front/Top/Right, which
-   forced awkward hole placement. Add `cad_sketch_begin(face=<selected face>)` and offset
-   planes, using `cad_find_faces` output as the target.
-8. **`cad_pattern`** (linear + circular) and **`cad_mirror`** — drive counts/spacing by variables;
-   select seed features/faces semantically.
-9. **`cad_revolve`** and **`cad_shell`** — round out the common solid-modeling verbs.
+5. **`cad_hole`** ✅ *shipped (minimal)* — circles at given centers on a plane/face + a blind
+   `REMOVE` extrude; diameter/depth accept `#variable`. **Deferred:** the native Hole feature
+   (counterbore/countersink/tapped, through-all) — its spec is huge/versioned; build it spec-first
+   later. Today a through-all hole = `depth` past the far face.
+6. **`cad_chamfer`** ✅ *shipped & verified* — equal-distance; `distance` accepts `#variable`.
+   Two-distance / distance-angle still to add (the builder already carries the extra spec params).
+7. **Sketch on a face / offset plane.** ✅ *shipped & verified* — `cad_sketch_begin(face=<id>)`
+   targets a `cad_find_faces` result; offset planes still TODO.
+8. **`cad_pattern`** (linear + circular) and **`cad_mirror`** — ⚠️ *implemented but NOT registered.*
+   The face-based builders are written + offline-tested, but face mirror/pattern of a cut (hole)
+   ERRORs on regenerate regardless of `operationType`. The robust path is **feature-based**
+   pattern/mirror (`fullFeaturePattern` + `instanceFunction`) and the correct `MirrorType`/
+   `PatternType` enum values — the featurespec doesn't expose the enum option strings, so discover
+   them in the **browser FeatureScript console** (zero API cost) before re-attempting. This is the
+   top P1 carry-over.
+9. **`cad_revolve`** ✅ *shipped & verified* (region + axis edge; `angle` or full 360) and
+   **`cad_shell`** ✅ *shipped & verified* (remove faces + inward `thickness`).
 
 ## P2 — Inspection, lifecycle, I/O
 

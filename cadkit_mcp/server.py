@@ -134,6 +134,78 @@ def _fillet_json(edge_ids, radius, name: str) -> Dict[str, Any]:
             {"btType": "BTMParameterQuantity-147", "isInteger": False,
              "expression": _scalar_expr(radius), "parameterId": "radius"}]}}
 
+
+# ---- generic parameter / feature constructors -----------------------------
+def _qlist(pid: str, ids) -> Dict[str, Any]:
+    return {"btType": "BTMParameterQueryList-148", "parameterId": pid,
+            "queries": [{"btType": "BTMIndividualQuery-138", "deterministicIds": list(ids)}]}
+
+def _enum(pid: str, enum_name: str, val: str) -> Dict[str, Any]:
+    return {"btType": "BTMParameterEnum-145", "enumName": enum_name, "value": val, "parameterId": pid}
+
+def _qty(pid: str, expr: str, integer: bool = False) -> Dict[str, Any]:
+    return {"btType": "BTMParameterQuantity-147", "isInteger": integer, "expression": expr, "parameterId": pid}
+
+def _flag(pid: str, val: bool) -> Dict[str, Any]:
+    return {"btType": "BTMParameterBoolean-144", "value": val, "parameterId": pid}
+
+def _region_param(sketch_fid: str) -> Dict[str, Any]:
+    return {"btType": "BTMParameterQueryList-148", "parameterId": "entities",
+            "queries": [{"btType": "BTMIndividualSketchRegionQuery-140", "filterInnerLoops": True,
+                         "queryString": f'query = qSketchRegion(id + "{sketch_fid}", true);',
+                         "featureId": sketch_fid, "deterministicIds": []}]}
+
+def _feat(ftype: str, name: str, params) -> Dict[str, Any]:
+    return {"feature": {"btType": "BTMFeature-134", "featureType": ftype, "name": name,
+                        "suppressed": False, "namespace": "", "parameters": params}}
+
+
+def _chamfer_json(edge_ids, distance, name: str) -> Dict[str, Any]:
+    return _feat("chamfer", name, [
+        _qlist("entities", edge_ids),
+        _enum("chamferType", "ChamferType", "EQUAL_OFFSETS"),
+        _qty("width", _scalar_expr(distance))])
+
+def _revolve_json(sketch_fid: str, axis_id: str, angle, op: str, name: str) -> Dict[str, Any]:
+    params = [_enum("bodyType", "ExtendedToolBodyType", "SOLID"),
+              _enum("operationType", "NewBodyOperationType", op),
+              _region_param(sketch_fid), _qlist("axis", [axis_id])]
+    if angle is None:
+        params.append(_flag("fullRevolve", True))
+    else:
+        params += [_flag("fullRevolve", False),
+                   _enum("endBound", "RevolveBoundingType", "BLIND"),
+                   _qty("angle", _scalar_expr(angle, "deg"))]
+    return _feat("revolve", name, params)
+
+def _shell_json(face_ids, thickness, name: str) -> Dict[str, Any]:
+    return _feat("shell", name, [
+        _qlist("entities", face_ids),
+        _qty("thickness", _scalar_expr(thickness)),
+        _flag("oppositeDirection", True)])  # shell inward (keep outer dimensions)
+
+def _mirror_json(face_ids, plane_id: str, name: str) -> Dict[str, Any]:
+    return _feat("mirror", name, [
+        _enum("patternType", "MirrorType", "FACE"),
+        _enum("operationType", "NewBodyOperationType", "ADD"),
+        _qlist("faces", face_ids), _qlist("mirrorPlane", [plane_id])])
+
+def _linear_pattern_json(face_ids, direction_id: str, distance, count: int, name: str) -> Dict[str, Any]:
+    return _feat("linearPattern", name, [
+        _enum("patternType", "PatternType", "FACE"),
+        _enum("operationType", "NewBodyOperationType", "ADD"),
+        _qlist("faces", face_ids), _qlist("directionOne", [direction_id]),
+        _qty("distance", _scalar_expr(distance)),
+        _qty("instanceCount", str(count), integer=True)])
+
+def _circular_pattern_json(face_ids, axis_id: str, count: int, angle, name: str) -> Dict[str, Any]:
+    return _feat("circularPattern", name, [
+        _enum("patternType", "PatternType", "FACE"),
+        _enum("operationType", "NewBodyOperationType", "ADD"),
+        _qlist("faces", face_ids), _qlist("axis", [axis_id]),
+        _qty("angle", _scalar_expr(angle, "deg")),
+        _qty("instanceCount", str(count), integer=True), _flag("equalSpace", True)])
+
 # --------------------------------------------------------------------------
 server = Server("cadkit")
 
@@ -148,9 +220,11 @@ async def list_tools() -> List[Tool]:
         Tool(name="cad_part_studio_create", description="Create a Part Studio; returns elementId.",
              inputSchema={"type": "object", "properties": {**ds, "name": {"type": "string"}},
                           "required": ["documentId", "workspaceId", "name"]}),
-        Tool(name="cad_sketch_begin", description="Open a sketch session on a plane (Front/Top/Right). Returns a sessionId.",
+        Tool(name="cad_sketch_begin", description="Open a sketch session on a standard plane (Front/Top/Right) OR an existing "
+             "face (pass its deterministic id from cad_find_faces as `face`). Returns a sessionId.",
              inputSchema={"type": "object", "properties": {**ds, "plane": {"type": "string", "enum": list(PLANES)},
-                          "name": {"type": "string"}}, "required": ["documentId", "workspaceId", "elementId"]}),
+                          "face": {"type": "string"}, "name": {"type": "string"}},
+                          "required": ["documentId", "workspaceId", "elementId"]}),
         Tool(name="cad_sketch_line", description="Add a line; returns its entityId (points are <id>.start / <id>.end).",
              inputSchema={"type": "object", "properties": {"sessionId": {"type": "string"}, "start": pt, "end": pt,
                           "construction": {"type": "boolean"}}, "required": ["sessionId", "start", "end"]}),
@@ -210,6 +284,35 @@ async def list_tools() -> List[Tool]:
              inputSchema={"type": "object", "properties": {**ds, "kind": {"type": "string", "enum": ["planar_by_normal","cylindrical"]},
                           "normal": {"type": "array", "items": {"type": "number"}}, "radius": {"type": "number"},
                           "tolerance": {"type": "number"}}, "required": ["documentId","workspaceId","elementId","kind"]}),
+        Tool(name="cad_chamfer", description="Equal-distance chamfer on edges (deterministic ids from cad_find_edges). "
+             "distance is inches (number) or an expression/#variable.",
+             inputSchema={"type": "object", "properties": {**ds, "edgeIds": {"type": "array", "items": {"type": "string"}},
+                          "distance": {"type": ["number", "string"]}, "name": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId","edgeIds","distance"]}),
+        Tool(name="cad_hole", description="Cut cylindrical hole(s): circles at the given centers on a plane/face, removed "
+             "by a blind extrude. diameter/depth accept numbers or #variables. plane is Front/Top/Right OR a face id "
+             "(from cad_find_faces).",
+             inputSchema={"type": "object", "properties": {**ds, "plane": {"type": "string"},
+                          "centers": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+                          "diameter": {"type": ["number", "string"]}, "depth": {"type": ["number", "string"]},
+                          "name": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId","plane","centers","diameter","depth"]}),
+        Tool(name="cad_revolve", description="Revolve a sketch region about an axis edge. angle in degrees (number/#var); "
+             "omit angle for a full 360 revolve. operation: NEW/ADD/REMOVE/INTERSECT.",
+             inputSchema={"type": "object", "properties": {**ds, "sketchFeatureId": {"type": "string"},
+                          "axisId": {"type": "string"}, "angle": {"type": ["number", "string"]},
+                          "operation": {"type": "string", "enum": ["NEW","ADD","REMOVE","INTERSECT"]}, "name": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId","sketchFeatureId","axisId"]}),
+        Tool(name="cad_shell", description="Hollow the solid by removing the given faces and leaving a wall. thickness is "
+             "inches (number) or #variable; wall is inward.",
+             inputSchema={"type": "object", "properties": {**ds, "faceIds": {"type": "array", "items": {"type": "string"}},
+                          "thickness": {"type": ["number", "string"]}, "name": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId","faceIds","thickness"]}),
+        # NOTE: cad_mirror / cad_pattern are intentionally NOT registered yet. The face-based
+        # builders below are kept and offline-tested, but face mirror/pattern of a cut (hole)
+        # errors on regenerate regardless of operationType. The robust path is FEATURE-based
+        # pattern/mirror (fullFeaturePattern + instanceFunction) with the correct MirrorType/
+        # PatternType enum values (discoverable in the browser FeatureScript console). See PLAN.md.
     ]
 
 @server.call_tool()
@@ -234,8 +337,9 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
         if name == "cad_sketch_begin":
             sid = _new_session_id()
+            target = a.get("face") or a.get("plane", "Front")  # face id overrides standard plane
             SESSIONS[sid] = SketchSession(a["documentId"], a["workspaceId"], a["elementId"],
-                                          a.get("plane", "Front"), a.get("name", "Sketch"))
+                                          target, a.get("name", "Sketch"))
             return _txt(json.dumps({"sessionId": sid}))
 
         if name in ("cad_sketch_line","cad_sketch_circle","cad_sketch_rectangle","cad_sketch_polyline",
@@ -325,6 +429,52 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             else: script = sel.fs_cylindrical_faces(a.get("radius"), a.get("tolerance", 0.001))
             res = await FS.evaluate(a["documentId"], a["workspaceId"], a["elementId"], script)
             return _txt(json.dumps({"faceIds": sel.parse_ids(res)}))
+
+        if name == "cad_chamfer":
+            r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
+                _chamfer_json(a["edgeIds"], a["distance"], a.get("name", "Chamfer")))
+            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+
+        if name == "cad_hole":
+            # circles at the centers on the plane/face, then a blind REMOVE extrude
+            sk = SketchSession(a["documentId"], a["workspaceId"], a["elementId"],
+                               a["plane"], a.get("name", "Hole") + " sketch")
+            for c in a["centers"]:
+                cid = sk.add_circle(tuple(c), 0.5)            # radius refined by the diameter dim
+                sk.dim_diameter(cid, a["diameter"])
+            rs = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"], sk.build())
+            sfid = rs["feature"]["featureId"]
+            re = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
+                _extrude_json(sfid, a["depth"], "REMOVE", a.get("name", "Hole")))
+            return _txt(json.dumps({"sketchFeatureId": sfid,
+                                    "status": re.get("featureState", {}).get("featureStatus")}))
+
+        if name == "cad_revolve":
+            r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
+                _revolve_json(a["sketchFeatureId"], a["axisId"], a.get("angle"),
+                              a.get("operation", "NEW"), a.get("name", "Revolve")))
+            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+
+        if name == "cad_shell":
+            r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
+                _shell_json(a["faceIds"], a["thickness"], a.get("name", "Shell")))
+            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+
+        if name == "cad_mirror":
+            pid = PLANES.get(a["planeId"], a["planeId"])     # accept Front/Top/Right or a face id
+            r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
+                _mirror_json(a["faceIds"], pid, a.get("name", "Mirror")))
+            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
+
+        if name == "cad_pattern":
+            if a["kind"] == "linear":
+                j = _linear_pattern_json(a["faceIds"], a["directionId"], a.get("spacing", 1.0),
+                                         a["count"], a.get("name", "Pattern"))
+            else:
+                j = _circular_pattern_json(a["faceIds"], a["axisId"], a["count"],
+                                           a.get("angle", 360), a.get("name", "Pattern"))
+            r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"], j)
+            return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
 
         return _txt(f"ERROR: unknown tool {name}")
     except Exception as e:

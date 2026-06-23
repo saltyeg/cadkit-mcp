@@ -82,3 +82,50 @@ def test_fillet_radius_expression_and_edges():
     assert rad["expression"] == "#r"
     ents = [p for p in j["parameters"] if p["parameterId"] == "entities"][0]
     assert ents["queries"][0]["deterministicIds"] == ["JHN"]
+
+
+# ---- P1 feature builders --------------------------------------------------
+def _ptypes(feature):
+    return [p["parameterId"] for p in feature["parameters"]]
+
+
+def test_chamfer_equal_offset_with_expression():
+    j = S._chamfer_json(["E1"], "#c", "c")["feature"]
+    assert j["featureType"] == "chamfer"
+    ct = [p for p in j["parameters"] if p["parameterId"] == "chamferType"][0]
+    assert ct["value"] == "EQUAL_OFFSETS"
+    w = [p for p in j["parameters"] if p["parameterId"] == "width"][0]
+    assert w["expression"] == "#c"
+
+
+def test_revolve_full_vs_angle():
+    full = S._revolve_json("F", "E2", None, "NEW", "r")["feature"]
+    assert "fullRevolve" in _ptypes(full) and "angle" not in _ptypes(full)
+    part = S._revolve_json("F", "E2", 90, "NEW", "r")["feature"]
+    ang = [p for p in part["parameters"] if p["parameterId"] == "angle"][0]
+    assert ang["expression"] == "90 deg"
+
+
+def test_shell_thickness_inward():
+    j = S._shell_json(["F1"], "#t", "s")["feature"]
+    assert j["featureType"] == "shell"
+    t = [p for p in j["parameters"] if p["parameterId"] == "thickness"][0]
+    assert t["expression"] == "#t"
+
+
+def test_sketch_on_face_targets_face_id():
+    # plane that isn't a standard name is treated as a deterministic face id
+    from cadkit_mcp.sketch import SketchSession
+    s = SketchSession("d", "w", "e", "JABC123", "onface")
+    plane_q = s.build()["feature"]["parameters"][0]
+    assert plane_q["queries"][0]["deterministicIds"] == ["JABC123"]
+
+
+# pattern/mirror builders remain (unregistered); assert structure so the code stays sound
+def test_pattern_mirror_builders_structure():
+    lin = S._linear_pattern_json(["F1"], "E1", "#d", 4, "p")["feature"]
+    assert lin["featureType"] == "linearPattern"
+    cnt = [p for p in lin["parameters"] if p["parameterId"] == "instanceCount"][0]
+    assert cnt["expression"] == "4" and cnt["isInteger"] is True
+    mir = S._mirror_json(["F1"], "JCC", "m")["feature"]
+    assert mir["featureType"] == "mirror"

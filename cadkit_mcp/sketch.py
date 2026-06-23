@@ -27,10 +27,11 @@ def _expr(value) -> str:
 class SketchSession:
     def __init__(self, document_id, workspace_id, element_id,
                  plane: str = "Front", name: str = "Sketch"):
-        if plane not in PLANES:
-            raise ValueError(f"plane must be one of {list(PLANES)}")
+        # `plane` is a standard plane name (Front/Top/Right) OR a deterministic face id
+        # from cad_find_faces — letting a sketch live on an existing face/offset plane.
         self.doc, self.ws, self.elem = document_id, workspace_id, element_id
         self.plane, self.name = plane, name
+        self.plane_id = PLANES.get(plane, plane)
         self.entities: List[Dict[str, Any]] = []
         self.constraints: List[Dict[str, Any]] = []
         self._n = 0
@@ -240,7 +241,7 @@ class SketchSession:
             "name": self.name, "suppressed": False,
             "parameters": [{"btType": "BTMParameterQueryList-148",
                             "queries": [{"btType": "BTMIndividualQuery-138",
-                                         "deterministicIds": [PLANES[self.plane]]}],
+                                         "deterministicIds": [self.plane_id]}],
                             "parameterId": "sketchPlane"}],
             "entities": self.entities, "constraints": self.constraints,
         }}
