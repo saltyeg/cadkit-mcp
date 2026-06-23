@@ -149,6 +149,13 @@ def _qty(pid: str, expr: str, integer: bool = False) -> Dict[str, Any]:
 def _flag(pid: str, val: bool) -> Dict[str, Any]:
     return {"btType": "BTMParameterBoolean-144", "value": val, "parameterId": pid}
 
+def _featlist(pid: str, feature_ids) -> Dict[str, Any]:
+    # references whole features (the thing a pattern/mirror repeats), not transient geometry
+    return {"btType": "BTMParameterFeatureList-1749", "parameterId": pid, "featureIds": list(feature_ids)}
+
+def _count_expr(count) -> str:
+    return count if isinstance(count, str) else str(int(count))
+
 def _region_param(sketch_fid: str) -> Dict[str, Any]:
     return {"btType": "BTMParameterQueryList-148", "parameterId": "entities",
             "queries": [{"btType": "BTMIndividualSketchRegionQuery-140", "filterInnerLoops": True,
@@ -184,27 +191,32 @@ def _shell_json(face_ids, thickness, name: str) -> Dict[str, Any]:
         _qty("thickness", _scalar_expr(thickness)),
         _flag("oppositeDirection", True)])  # shell inward (keep outer dimensions)
 
-def _mirror_json(face_ids, plane_id: str, name: str) -> Dict[str, Any]:
+# Feature-based pattern/mirror: repeat whole FEATURES (patternType=FEATURE + instanceFunction),
+# not faces. Verified against hand-built examples — face-based variants errored on regenerate.
+def _mirror_json(feature_ids, plane_id: str, name: str) -> Dict[str, Any]:
     return _feat("mirror", name, [
-        _enum("patternType", "MirrorType", "FACE"),
-        _enum("operationType", "NewBodyOperationType", "ADD"),
-        _qlist("faces", face_ids), _qlist("mirrorPlane", [plane_id])])
+        _enum("patternType", "MirrorType", "FEATURE"),
+        _enum("operationType", "NewBodyOperationType", "NEW"),
+        _featlist("instanceFunction", feature_ids),
+        _qlist("mirrorPlane", [plane_id])])
 
-def _linear_pattern_json(face_ids, direction_id: str, distance, count: int, name: str) -> Dict[str, Any]:
+def _linear_pattern_json(feature_ids, direction_id: str, distance, count, name: str) -> Dict[str, Any]:
     return _feat("linearPattern", name, [
-        _enum("patternType", "PatternType", "FACE"),
-        _enum("operationType", "NewBodyOperationType", "ADD"),
-        _qlist("faces", face_ids), _qlist("directionOne", [direction_id]),
+        _enum("patternType", "PatternType", "FEATURE"),
+        _enum("operationType", "NewBodyOperationType", "NEW"),
+        _featlist("instanceFunction", feature_ids),
+        _qlist("directionOne", [direction_id]),
         _qty("distance", _scalar_expr(distance)),
-        _qty("instanceCount", str(count), integer=True)])
+        _qty("instanceCount", _count_expr(count), integer=True)])
 
-def _circular_pattern_json(face_ids, axis_id: str, count: int, angle, name: str) -> Dict[str, Any]:
+def _circular_pattern_json(feature_ids, axis_id: str, count, angle, name: str) -> Dict[str, Any]:
     return _feat("circularPattern", name, [
-        _enum("patternType", "PatternType", "FACE"),
-        _enum("operationType", "NewBodyOperationType", "ADD"),
-        _qlist("faces", face_ids), _qlist("axis", [axis_id]),
+        _enum("patternType", "PatternType", "FEATURE"),
+        _enum("operationType", "NewBodyOperationType", "NEW"),
+        _featlist("instanceFunction", feature_ids),
+        _qlist("axis", [axis_id]),
         _qty("angle", _scalar_expr(angle, "deg")),
-        _qty("instanceCount", str(count), integer=True), _flag("equalSpace", True)])
+        _qty("instanceCount", _count_expr(count), integer=True), _flag("equalSpace", True)])
 
 # --------------------------------------------------------------------------
 server = Server("cadkit")
@@ -308,11 +320,20 @@ async def list_tools() -> List[Tool]:
              inputSchema={"type": "object", "properties": {**ds, "faceIds": {"type": "array", "items": {"type": "string"}},
                           "thickness": {"type": ["number", "string"]}, "name": {"type": "string"}},
                           "required": ["documentId","workspaceId","elementId","faceIds","thickness"]}),
-        # NOTE: cad_mirror / cad_pattern are intentionally NOT registered yet. The face-based
-        # builders below are kept and offline-tested, but face mirror/pattern of a cut (hole)
-        # errors on regenerate regardless of operationType. The robust path is FEATURE-based
-        # pattern/mirror (fullFeaturePattern + instanceFunction) with the correct MirrorType/
-        # PatternType enum values (discoverable in the browser FeatureScript console). See PLAN.md.
+        Tool(name="cad_mirror", description="Mirror whole features across a plane. featureIds = the features to "
+             "repeat (e.g. an extrude/hole featureId); planeId = Front/Top/Right or a face/plane id.",
+             inputSchema={"type": "object", "properties": {**ds, "featureIds": {"type": "array", "items": {"type": "string"}},
+                          "planeId": {"type": "string"}, "name": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId","featureIds","planeId"]}),
+        Tool(name="cad_pattern", description="Pattern whole features. kind=linear needs directionId (an edge) + spacing "
+             "(number/#var) + count; kind=circular needs axisId (an edge) + count, evenly spaced over angle (default 360). "
+             "featureIds = the features to repeat.",
+             inputSchema={"type": "object", "properties": {**ds, "kind": {"type": "string", "enum": ["linear","circular"]},
+                          "featureIds": {"type": "array", "items": {"type": "string"}},
+                          "directionId": {"type": "string"}, "axisId": {"type": "string"},
+                          "spacing": {"type": ["number", "string"]}, "angle": {"type": ["number", "string"]},
+                          "count": {"type": ["integer", "string"]}, "name": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId","kind","featureIds","count"]}),
     ]
 
 @server.call_tool()
@@ -463,15 +484,15 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         if name == "cad_mirror":
             pid = PLANES.get(a["planeId"], a["planeId"])     # accept Front/Top/Right or a face id
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
-                _mirror_json(a["faceIds"], pid, a.get("name", "Mirror")))
+                _mirror_json(a["featureIds"], pid, a.get("name", "Mirror")))
             return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))
 
         if name == "cad_pattern":
             if a["kind"] == "linear":
-                j = _linear_pattern_json(a["faceIds"], a["directionId"], a.get("spacing", 1.0),
+                j = _linear_pattern_json(a["featureIds"], a["directionId"], a.get("spacing", 1.0),
                                          a["count"], a.get("name", "Pattern"))
             else:
-                j = _circular_pattern_json(a["faceIds"], a["axisId"], a["count"],
+                j = _circular_pattern_json(a["featureIds"], a["axisId"], a["count"],
                                            a.get("angle", 360), a.get("name", "Pattern"))
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"], j)
             return _txt(json.dumps({"status": r.get("featureState", {}).get("featureStatus")}))

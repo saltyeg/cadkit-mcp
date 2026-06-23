@@ -121,11 +121,41 @@ def test_sketch_on_face_targets_face_id():
     assert plane_q["queries"][0]["deterministicIds"] == ["JABC123"]
 
 
-# pattern/mirror builders remain (unregistered); assert structure so the code stays sound
-def test_pattern_mirror_builders_structure():
-    lin = S._linear_pattern_json(["F1"], "E1", "#d", 4, "p")["feature"]
+# pattern/mirror are FEATURE-based: they repeat whole features (instanceFunction), not faces.
+# REGRESSION: the original face-based form (patternType=FACE + a `faces` query) errored on
+# regenerate. Assert the verified structure instead.
+def _params(feature):
+    return {p["parameterId"]: p for p in feature["parameters"]}
+
+
+def test_linear_pattern_is_feature_based():
+    lin = S._linear_pattern_json(["FEXT1"], "E1", "#d", 4, "p")["feature"]
     assert lin["featureType"] == "linearPattern"
-    cnt = [p for p in lin["parameters"] if p["parameterId"] == "instanceCount"][0]
-    assert cnt["expression"] == "4" and cnt["isInteger"] is True
-    mir = S._mirror_json(["F1"], "JCC", "m")["feature"]
+    p = _params(lin)
+    assert p["patternType"]["value"] == "FEATURE" and p["patternType"]["enumName"] == "PatternType"
+    assert "faces" not in p  # the old (broken) face form must not reappear
+    fl = p["instanceFunction"]
+    assert fl["btType"].startswith("BTMParameterFeatureList") and fl["featureIds"] == ["FEXT1"]
+    assert p["directionOne"]["queries"][0]["deterministicIds"] == ["E1"]
+    assert p["distance"]["expression"] == "#d"
+    assert p["instanceCount"]["expression"] == "4" and p["instanceCount"]["isInteger"] is True
+
+
+def test_circular_pattern_is_feature_based():
+    cir = S._circular_pattern_json(["FEXT1"], "JNB", 6, 360, "c")["feature"]
+    p = _params(cir)
+    assert cir["featureType"] == "circularPattern"
+    assert p["patternType"]["value"] == "FEATURE"
+    assert p["instanceFunction"]["featureIds"] == ["FEXT1"]
+    assert p["axis"]["queries"][0]["deterministicIds"] == ["JNB"]
+    assert p["angle"]["expression"] == "360 deg" and p["equalSpace"]["value"] is True
+
+
+def test_mirror_is_feature_based():
+    mir = S._mirror_json(["FEXT1"], "JEC", "m")["feature"]
+    p = _params(mir)
     assert mir["featureType"] == "mirror"
+    assert p["patternType"]["value"] == "FEATURE" and p["patternType"]["enumName"] == "MirrorType"
+    assert "faces" not in p
+    assert p["instanceFunction"]["featureIds"] == ["FEXT1"]
+    assert p["mirrorPlane"]["queries"][0]["deterministicIds"] == ["JEC"]

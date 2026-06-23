@@ -64,13 +64,16 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
    Two-distance / distance-angle still to add (the builder already carries the extra spec params).
 7. **Sketch on a face / offset plane.** ✅ *shipped & verified* — `cad_sketch_begin(face=<id>)`
    targets a `cad_find_faces` result; offset planes still TODO.
-8. **`cad_pattern`** (linear + circular) and **`cad_mirror`** — ⚠️ *implemented but NOT registered.*
-   The face-based builders are written + offline-tested, but face mirror/pattern of a cut (hole)
-   ERRORs on regenerate regardless of `operationType`. The robust path is **feature-based**
-   pattern/mirror (`fullFeaturePattern` + `instanceFunction`) and the correct `MirrorType`/
-   `PatternType` enum values — the featurespec doesn't expose the enum option strings, so discover
-   them in the **browser FeatureScript console** (zero API cost) before re-attempting. This is the
-   top P1 carry-over.
+8. **`cad_pattern`** (linear + circular) and **`cad_mirror`** ✅ *shipped (feature-based).*
+   Reworked from the broken face form to **feature-based**: `patternType=FEATURE` + an
+   `instanceFunction` (`BTMParameterFeatureList-1749`) holding the `featureIds` to repeat — the
+   parameter the face form lacked. Ground truth was read back from hand-built, regenerating UI
+   features (one `get_features` read, zero guessing): `MirrorType.FEATURE`/`PatternType.FEATURE`,
+   geometry refs `mirrorPlane` / `directionOne` / `axis`, `operationType=NEW`. Builders emit the
+   exact verified JSON; 3 offline regression tests pin the structure (and that the old `faces`
+   form can't reappear). `cad_mirror(featureIds, planeId)`, `cad_pattern(kind, featureIds, …)`.
+   *Optional follow-up:* an on-demand live regen smoke (~5 calls) — not run, since the emitted
+   JSON is identical to features known to regenerate.
 9. **`cad_revolve`** ✅ *shipped & verified* (region + axis edge; `angle` or full 360) and
    **`cad_shell`** ✅ *shipped & verified* (remove faces + inward `thickness`).
 
