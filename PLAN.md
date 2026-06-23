@@ -43,11 +43,16 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
    take bare floats. Accept a number **or** an expression/`#variable` (same `_expr` path the
    dimensions already use) so depth/thickness can be driven by variables too.
 
-4. **Wire `devkit` into a real test suite.**
-   cadkit has zero tests. Add `pytest` tests using `ScratchStudio` + `measure_fs` (one studio,
-   one eval per assertion) so coverage is **quota-frugal** (~2,500 successful calls/user/yr —
-   see the devkit docstring). Cover: variable resolves; variable drives geometry; ground-origin
-   pins; fully-defined detection; concave→fillet; hole cut.
+4. **Lightweight, quota-aware checks — NOT a broad live suite.**
+   A full live test suite is counterproductive here: every assertion is a successful call
+   against the 2,500/user/yr budget, so CI-on-push would drain it. Two proportionate layers:
+   - **Offline builder tests (free, primary).** Assert on the JSON the builders *emit* —
+     validate parameter ids/types against a cached `featurespec`, check the L-profile yields
+     6 lines + ground + expected constraints. This catches the class of bug that actually hurt
+     (the `assignVariable` wrong-`parameterId`) with **zero** API calls.
+   - **One on-demand live smoke test (~6–8 calls), run manually before a release.** Only for
+     truths offline can't prove: variable *drives* geometry, ground *pins*, concave→fillet.
+     Via `ScratchStudio` + a single `measure_fs`. No CI, not on every change.
 
 ## P1 — Features needed for real parts
 
@@ -100,5 +105,6 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
 
 ## Definition of done for a feature
 1. featurespec fetched + parameters validated locally · 2. emits fully-defined / parametric
-output where applicable · 3. quota-frugal `pytest` via `ScratchStudio` · 4. example in
+output where applicable · 3. an **offline** builder assertion (validate emitted JSON; no API)
+— add to the on-demand live smoke test only if behavior can't be proven offline · 4. example in
 `examples/` and a line in the README · 5. PR targets `main`.
