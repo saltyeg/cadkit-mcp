@@ -20,6 +20,7 @@ from onshape_mcp.api.export import ExportManager
 from .sketch import SketchSession, PLANES
 from .devkit import measure_fs, parse_fs
 from . import selection as sel
+from . import quota
 
 def _load_creds() -> OnshapeCredentials:
     ak, sk = os.getenv("ONSHAPE_ACCESS_KEY", ""), os.getenv("ONSHAPE_SECRET_KEY", "")
@@ -40,6 +41,7 @@ def _load_creds() -> OnshapeCredentials:
     return OnshapeCredentials(access_key=ak, secret_key=sk)
 
 client = OnshapeClient(_load_creds())
+quota.instrument(client)        # count every successful API call so spend is visible, not a guess
 PS = PartStudioManager(client)
 FS = FeatureScriptManager(client)
 DOCS = DocumentManager(client)
@@ -498,6 +500,10 @@ async def list_tools() -> List[Tool]:
              "(default STEP). Optional partId to export a single part. Returns the translation result.",
              inputSchema={"type": "object", "properties": {**ds, "format": {"type": "string"}, "partId": {"type": "string"}},
                           "required": ["documentId","workspaceId","elementId"]}),
+        Tool(name="cad_api_calls", description="Report how many SUCCESSFUL Onshape API calls (2xx/3xx — the ones that count "
+             "against the 2,500/user/yr budget) cadkit has made this session. Costs no API call. Check it before/after "
+             "live work to keep quota spend visible.",
+             inputSchema={"type": "object", "properties": {}}),
     ]
 
 @server.call_tool()
@@ -726,6 +732,9 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             r = await EXPORT.export_part_studio(a["documentId"], a["workspaceId"], a["elementId"],
                                                 a.get("format", "STEP"), a.get("partId"))
             return _txt(json.dumps(r) if isinstance(r, (dict, list)) else json.dumps({"result": str(r)}))
+
+        if name == "cad_api_calls":
+            return _txt(json.dumps(quota.counts()))
 
         return _txt(f"ERROR: unknown tool {name}")
     except Exception as e:
