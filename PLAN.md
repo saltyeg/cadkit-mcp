@@ -58,9 +58,16 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
 ## P1 — Features needed for real parts
 
 5. **`cad_hole`** ✅ *shipped (minimal)* — circles at given centers on a plane/face + a blind
-   `REMOVE` extrude; diameter/depth accept `#variable`. **Deferred:** the native Hole feature
-   (counterbore/countersink/tapped, through-all) — its spec is huge/versioned; build it spec-first
-   later. Today a through-all hole = `depth` past the far face.
+   `REMOVE` extrude; diameter/depth accept `#variable`; multiple centers per call. Today a
+   through-all hole = `depth` past the far face. **Next: counterbore / countersink** via the
+   native Onshape `hole` feature. Its spec is huge/versioned (~150 params: V2/V3 duplicates,
+   per-quantity tolerance bounds, lookup tables) — but only ~12 matter, recovered spec-first from
+   the user's reference (`featureType:"hole"`, `holeVersion=V3`, `styleV2=HoleStyle.C_BORE` |
+   `SIMPLE` | `C_SINK`, `holeDiameterV3`, `cBoreDiameterV3`/`cBoreDepthV3`,
+   `cSinkDiameterV3`/`cSinkAngleV3`, `endStyleV2=BLIND/THROUGH`, `holeDepthV3`, `locations` +
+   `scope` queries). Plan: a `cad_hole(style="simple|counterbore|countersink", …)` that emits the
+   native feature with those params and leaves the tolerance/tap machinery at defaults. Tapped
+   threads are a later add. Keep the simple circle-extrude path as a fallback.
 6. **`cad_chamfer`** ✅ *shipped & verified* — equal-distance; `distance` accepts `#variable`.
    Two-distance / distance-angle still to add (the builder already carries the extra spec params).
 7. **Sketch on a face / offset plane.** ✅ *shipped & verified* — `cad_sketch_begin(face=<id>)`
@@ -95,6 +102,23 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
 13. **`cad_get_variables`** ✅ *shipped* — lists name + **authored expression** by scanning the
     `assignVariable` features (one API call, unit-faithful — avoids the metre/inch ambiguity of
     resolving `getVariable`, and the `/variables` REST endpoint 404s on this tier anyway).
+
+## Findings from the full-part integration test (`scripts/build_example_bracket.py`)
+
+The angle-bracket build composes ~14 tools and self-checks by asserting measured geometry
+against the variables (incl. editing `#leg` and confirming the solid grows). It surfaced two
+bugs the per-tool smokes could not:
+
+- **FIXED — teardrop/chamfered bore.** A circle is two semicircle arcs sharing a center but not
+  a radius; a single diameter/radius dimension bound only the `.a` arc, leaving `.b` at the
+  placeholder → a lopsided bore (and an oversized loose arc could split a thin wall, giving 2
+  solids). `add_circle` now adds an `EQUAL` between the two arcs so one dimension drives the whole
+  circle. Affected `cad_hole` *and* `cad_sketch_circle`; offline regression added.
+- **OPEN — `cad_pattern`/`cad_mirror` of a subtractive feature errors.** Feature-pattern of an
+  additive boss works (verified), but patterning a `REMOVE` hole errors and leaks a stray body
+  (our `operationType=NEW`). Idiomatic workaround in place: repeat holes via multiple centers in
+  one `cad_hole`. Real fix needs the correct op/scope for patterning a cut — discover spec-first
+  from a hand-built "pattern of a hole" reference (as we did for the additive case).
 
 ## P3 — Selection & ergonomics
 

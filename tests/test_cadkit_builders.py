@@ -42,6 +42,19 @@ def test_diagnostics_wellformed_when_grounded_and_dimensioned():
     assert d["grounded"] and d["dimensions"] == 1 and d["wellFormed"]
 
 
+def test_circle_arcs_tied_equal_so_one_dim_drives_whole_circle():
+    # REGRESSION: a circle is two semicircle arcs; without an EQUAL tying them, a single
+    # diameter/radius dim binds only the .a arc and the .b arc floats to the placeholder ->
+    # lopsided "teardrop"/chamfered bore (and an oversized loose arc can split a thin wall).
+    s = _session()
+    c = s.add_circle((1, 1), 0.5)
+    eqs = [k for k in s.constraints if k["constraintType"] == "EQUAL"]
+    tied = [k for k in eqs
+            if {p.get("value") for p in k["parameters"] if p["btType"].startswith("BTMParameterString")}
+            == {f"{c}.a", f"{c}.b"}]
+    assert tied, "add_circle must EQUAL-tie its two arcs so one dimension drives the full circle"
+
+
 def test_dim_length_accepts_variable_expression():
     s = _session(); l = s.add_line((0, 0), (2, 0)); s.dim_length(l, "#leg_len")
     q = [p for p in s.constraints[-1]["parameters"] if p.get("parameterId") == "length"][0]

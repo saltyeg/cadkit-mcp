@@ -79,6 +79,12 @@ class SketchSession:
                           ("close2", f"{cid}.b.end", f"{cid}.a.start")):
             self.constraints.append(self._con("COINCIDENT", f"{cid}.{tag}",
                 [self._str(a, "localFirst"), self._str(b, "localSecond")]))
+        # The two arcs share a center but NOT a radius — without this, a single diameter/radius
+        # dimension binds only the .a arc and leaves .b at the placeholder, yielding a lopsided
+        # "teardrop" bore (looks like a chamfer, and an oversized loose arc can split a thin wall).
+        # EQUAL ties the arcs so one dimension drives the whole circle.
+        self.constraints.append(self._con("EQUAL", f"{cid}.req",
+            [self._str(f"{cid}.a", "localFirst"), self._str(f"{cid}.b", "localSecond")]))
         return cid
 
     def add_rectangle(self, corner1, corner2):
