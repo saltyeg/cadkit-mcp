@@ -171,6 +171,71 @@ def fs_extreme_edges(axis: str, want_max: bool = True, tol_in: float = 0.01) -> 
 }}"""
 
 
+def fs_faces_on_plane(axis: str, coord_in: float, tol_in: float = 0.01) -> str:
+    """Planar faces lying in the plane {axis} = coord — e.g. 'the face on Z=0'. A face counts when
+    it is thin along the axis (min ≈ max, so it's parallel to the plane) AND sits at the coord.
+    Built on evBox3d, the same primitive `fs_extreme_faces` uses (already live-verified)."""
+    i = _AXIS_IDX[axis]
+    return f"""function(context is Context, queries){{
+  var out = [];
+  for (var f in evaluateQuery(context, {SOLID_FACES})){{
+    var b = evBox3d(context, {{"topology": f}});
+    var lo = b.minCorner[{i}]/inch; var hi = b.maxCorner[{i}]/inch;
+    if (abs(hi - lo) < {tol_in} && abs((lo + hi)/2 - ({coord_in})) < {tol_in}){{
+      out = append(out, transientQueriesToStrings(f));
+    }}
+  }}
+  return out;
+}}"""
+
+
+def fs_edges_on_plane(axis: str, coord_in: float, tol_in: float = 0.01) -> str:
+    """Edges lying in the plane {axis} = coord — e.g. every edge at Z=1. An edge counts when its
+    box is thin along the axis (it lies in the plane) and sits at the coord."""
+    i = _AXIS_IDX[axis]
+    return f"""function(context is Context, queries){{
+  var out = [];
+  for (var e in evaluateQuery(context, {SOLID_EDGES})){{
+    var b = evBox3d(context, {{"topology": e}});
+    var lo = b.minCorner[{i}]/inch; var hi = b.maxCorner[{i}]/inch;
+    if (abs(hi - lo) < {tol_in} && abs((lo + hi)/2 - ({coord_in})) < {tol_in}){{
+      out = append(out, transientQueriesToStrings(e));
+    }}
+  }}
+  return out;
+}}"""
+
+
+def fs_faces_adjacent_to_extreme(axis: str, want_max: bool = True) -> str:
+    """Faces that border the extreme face along an axis — e.g. 'the side faces around the top'.
+
+    Composes a seed (the extreme face, found exactly like `fs_extreme_faces`) with the faces
+    sharing an edge with it, all in one eval so no transient id has to be round-tripped back into
+    a query.
+
+    The `qAdjacent(query, AdjacencyType.EDGE, EntityType.FACE)` signature is LIVE-VERIFIED
+    (scripts/smoke_fillet_adjacency.py: on a box it returned the side faces bordering the top
+    face). Onshape's qAdjacent already excludes the seed, so no manual subtraction is needed.
+    """
+    i = _AXIS_IDX[axis]
+    cmp = ">" if want_max else "<"
+    init = "-1e18" if want_max else "1e18"
+    return f"""function(context is Context, queries){{
+  var best; var bestV = {init};
+  for (var f in evaluateQuery(context, {SOLID_FACES})){{
+    var b = evBox3d(context, {{"topology": f}});
+    var v = (b.minCorner[{i}] + b.maxCorner[{i}]) / 2 / inch;
+    if (v {cmp} bestV){{ bestV = v; best = f; }}
+  }}
+  if (best == undefined){{ return []; }}
+  var out = [];
+  for (var nb in evaluateQuery(context, qAdjacent(best, AdjacencyType.EDGE, EntityType.FACE))){{
+    out = append(out, transientQueriesToStrings(nb));
+  }}
+  return out;
+}}"""
+
+
 def fs_sketch_vertices(sketch_fid: str) -> str:
     """Deterministic ids of the point/vertex entities a sketch created — the native Hole
     feature's `locations` are sketch points."""

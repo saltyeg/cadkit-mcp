@@ -87,6 +87,154 @@ class SketchSession:
             [self._str(f"{cid}.a", "localFirst"), self._str(f"{cid}.b", "localSecond")]))
         return cid
 
+    def add_arc(self, center: Tuple[float, float], start: Tuple[float, float],
+                end: Tuple[float, float], construction: bool = False) -> str:
+        """A center-point arc swept CCW from `start` to `end`.
+
+        Radius is fixed by `start` (distance center→start); the end point snaps onto that
+        radius — standard center-point-arc behavior. The sweep is fully determined by the CCW
+        direction, so to get the *complementary* arc you swap `start` and `end` (no separate
+        clockwise flag — that keeps us on the one parameterization proven by `add_circle`'s
+        semicircles: `clockwise:False`, params increasing). One BTMSketchCurveSegment-155 on a
+        circle geometry, spanning a partial angle instead of the full 2π."""
+        cx, cy = center; sx, sy = start; ex, ey = end
+        r = math.hypot(sx - cx, sy - cy)
+        if r == 0:
+            raise ValueError("arc start point cannot coincide with the center")
+        a0 = math.atan2(sy - cy, sx - cx)
+        a1 = math.atan2(ey - cy, ex - cx)
+        sweep = (a1 - a0) % (2 * math.pi)
+        if sweep == 0:
+            raise ValueError("arc start and end span zero angle (use add_circle for a full circle)")
+        aid = self._id("arc")
+        self.entities.append({
+            "btType": "BTMSketchCurveSegment-155", "entityId": aid,
+            "startPointId": f"{aid}.start", "endPointId": f"{aid}.end",
+            "startParam": a0, "endParam": a0 + sweep,
+            "geometry": {"btType": "BTCurveGeometryCircle-115", "radius": r * IN,
+                         "xCenter": cx * IN, "yCenter": cy * IN,
+                         "xDir": 1.0, "yDir": 0.0, "clockwise": False},
+            "centerId": f"{aid}.center", "isConstruction": construction,
+        })
+        return aid
+
+    def _line_points(self, eid: str):
+        """Reconstruct a line's (start, end) in inches from the JSON we emitted."""
+        e = next((x for x in self.entities if x.get("entityId") == eid), None)
+        if e is None or not e["geometry"]["btType"].startswith("BTCurveGeometryLine"):
+            raise ValueError(f"{eid} is not a line in this sketch")
+        g = e["geometry"]
+        sx, sy = g["pntX"] / IN, g["pntY"] / IN
+        L = e["endParam"] / IN
+        return e, (sx, sy), (sx + g["dirX"] * L, sy + g["dirY"] * L)
+
+    def _retrim_line_to(self, eid: str, corner_is_start: bool,
+                        new_corner: Tuple[float, float], far: Tuple[float, float]):
+        """Shorten a line so its corner end lands on the fillet tangent point."""
+        e = next(x for x in self.entities if x.get("entityId") == eid)
+        g = e["geometry"]
+        nx, ny = new_corner; fx, fy = far
+        newlen = math.hypot(fx - nx, fy - ny)
+        if corner_is_start:                       # start moves to the tangent point; far end stays
+            g["pntX"], g["pntY"] = nx * IN, ny * IN
+            g["dirX"], g["dirY"] = (fx - nx) / newlen, (fy - ny) / newlen
+        # else: end moves inward; start + direction are unchanged, only the length shrinks
+        e["endParam"] = newlen * IN
+
+    def add_fillet(self, line1: str, line2: str, radius: float) -> Dict[str, Any]:
+        """Round the corner where two lines meet with a tangent arc of `radius`.
+
+        Trims both lines back to their tangent points, drops the old corner coincident (so the
+        two ends aren't forced back together), inserts a center-point arc, and adds the
+        coincident + tangent constraints that make the fillet parametric. Pure trig — the tangent
+        points sit a distance r/tan(θ/2) along each line from the corner; the arc center sits on
+        the angle bisector at r/sin(θ/2). Returns the arc id and the computed geometry."""
+        _, s1, en1 = self._line_points(line1)
+        _, s2, en2 = self._line_points(line2)
+        tol = 1e-6
+        def close(p, q): return math.hypot(p[0] - q[0], p[1] - q[1]) < tol
+        match = next((m for m in (("start", "start", s1, s2), ("start", "end", s1, en2),
+                                  ("end", "start", en1, s2), ("end", "end", en1, en2))
+                      if close(m[2], m[3])), None)
+        if match is None:
+            raise ValueError(f"{line1} and {line2} do not share a corner to fillet")
+        end1, end2, C, _ = match
+        far1 = en1 if end1 == "start" else s1
+        far2 = en2 if end2 == "start" else s2
+        u1 = (far1[0] - C[0], far1[1] - C[1]); l1 = math.hypot(*u1); u1 = (u1[0] / l1, u1[1] / l1)
+        u2 = (far2[0] - C[0], far2[1] - C[1]); l2 = math.hypot(*u2); u2 = (u2[0] / l2, u2[1] / l2)
+        dot = max(-1.0, min(1.0, u1[0] * u2[0] + u1[1] * u2[1]))
+        theta = math.acos(dot)
+        if theta < 1e-6 or abs(theta - math.pi) < 1e-6:
+            raise ValueError("fillet needs two non-collinear lines meeting at a corner")
+        d = radius / math.tan(theta / 2)
+        if d >= l1 - 1e-9 or d >= l2 - 1e-9:
+            raise ValueError(f"fillet radius {radius} too large to fit "
+                             f"(needs {d:.4f} in of run along each line)")
+        T1 = (C[0] + u1[0] * d, C[1] + u1[1] * d)
+        T2 = (C[0] + u2[0] * d, C[1] + u2[1] * d)
+        bis = (u1[0] + u2[0], u1[1] + u2[1]); bl = math.hypot(*bis); bis = (bis[0] / bl, bis[1] / bl)
+        h = radius / math.sin(theta / 2)
+        O = (C[0] + bis[0] * h, C[1] + bis[1] * h)
+        # drop the corner coincident that pinned the two ends together (else it conflicts with the arc)
+        corner_pts = {f"{line1}.{end1}", f"{line2}.{end2}"}
+        self.constraints = [c for c in self.constraints if not (
+            c.get("constraintType") == "COINCIDENT"
+            and {p.get("value") for p in c["parameters"] if p["btType"].startswith("BTMParameterString")}
+            == corner_pts)]
+        self._retrim_line_to(line1, end1 == "start", T1, far1)
+        self._retrim_line_to(line2, end2 == "start", T2, far2)
+        # order the arc endpoints so the CCW sweep is the minor (fillet) arc
+        def ang(p): return math.atan2(p[1] - O[1], p[0] - O[0])
+        if (ang(T2) - ang(T1)) % (2 * math.pi) <= math.pi:
+            arc = self.add_arc(O, T1, T2)
+            self.coincident(f"{line1}.{end1}", f"{arc}.start")
+            self.coincident(f"{line2}.{end2}", f"{arc}.end")
+        else:
+            arc = self.add_arc(O, T2, T1)
+            self.coincident(f"{line2}.{end2}", f"{arc}.start")
+            self.coincident(f"{line1}.{end1}", f"{arc}.end")
+        self.tangent(line1, arc); self.tangent(line2, arc)
+        return {"arc": arc, "center": [O[0], O[1]],
+                "tangentPoints": [[T1[0], T1[1]], [T2[0], T2[1]]], "radius": radius}
+
+    def add_mirror(self, entity_ids: List[str], axis_line: str) -> Dict[str, str]:
+        """Mirror sketch LINES across an existing line entity (the axis).
+
+        Reflects each line's endpoints and emits the copy at the correct mirrored coordinates, so
+        the copy is geometrically right on its own; also adds a MIRROR constraint tying copy to
+        original so an edit to one propagates. Returns {originalId: copyId}.
+
+        Lines only for now (the common symmetric-profile case); arcs/circles are a follow-up. The
+        MIRROR constraint (localFirst/localSecond entities + `local` axis) is LIVE-VERIFIED: it
+        regenerates `OK` and produces the correct mirrored solid (scripts/smoke_sketch_mirror.py —
+        a half-diamond mirrors to a 2.0 in^3 rhombus, X bbox symmetric [-1,1]). Edit-propagation
+        isn't separately exercised, but the constraint is accepted and consistent (no over/under
+        -constrained error)."""
+        _, p1, p2 = self._line_points(axis_line)
+        dx, dy = p2[0] - p1[0], p2[1] - p1[1]
+        dd = dx * dx + dy * dy
+        if dd == 0:
+            raise ValueError("mirror axis line is degenerate")
+
+        def reflect(q):
+            t = ((q[0] - p1[0]) * dx + (q[1] - p1[1]) * dy) / dd
+            fx, fy = p1[0] + t * dx, p1[1] + t * dy
+            return (2 * fx - q[0], 2 * fy - q[1])
+
+        mapping: Dict[str, str] = {}
+        for eid in entity_ids:
+            e = next((x for x in self.entities if x.get("entityId") == eid), None)
+            if e is None or not e["geometry"]["btType"].startswith("BTCurveGeometryLine"):
+                raise ValueError(f"{eid} is not a mirrorable line (lines only for now)")
+            _, s, en = self._line_points(eid)
+            copy = self.add_line(reflect(s), reflect(en))
+            mapping[eid] = copy
+            self.constraints.append(self._con("MIRROR", self._id("mir"),
+                [self._str(eid, "localFirst"), self._str(copy, "localSecond"),
+                 self._str(axis_line, "local")]))
+        return mapping
+
     def add_point(self, at: Tuple[float, float], construction: bool = False) -> str:
         """A standalone sketch point — used as a hole `locations` target (native Hole feature)."""
         px, py = at
@@ -211,15 +359,22 @@ class SketchSession:
             {"btType": "BTMParameterEnum-145", "value": "ALIGNED",
              "enumName": "DimensionAlignment", "parameterId": "alignment"}]))
 
+    def _radius_target(self, ref: str) -> str:
+        """The entity a radius/diameter dimension should bind to. A circle is two semicircle
+        arcs, so its dimension targets the `.a` sub-arc; a standalone `add_arc` IS the curve, so
+        it targets the entity itself. Decided by what actually exists — not by an id prefix."""
+        ids = {e["entityId"] for e in self.entities}
+        return f"{ref}.a" if f"{ref}.a" in ids else ref
+
     def dim_radius(self, circle: str, value):
         self.constraints.append(self._con("RADIUS", self._id("drad"), [
-            self._str(f"{circle}.a", "localFirst"),
+            self._str(self._radius_target(circle), "localFirst"),
             {"btType": "BTMParameterQuantity-147", "expression": _expr(value),
              "parameterId": "radius", "isInteger": False}]))
 
     def dim_diameter(self, circle: str, value):
         self.constraints.append(self._con("DIAMETER", self._id("ddia"), [
-            self._str(f"{circle}.a", "localFirst"),
+            self._str(self._radius_target(circle), "localFirst"),
             {"btType": "BTMParameterQuantity-147", "expression": _expr(value),
              "parameterId": "length", "isInteger": False}]))
 
