@@ -40,7 +40,27 @@ def _load_creds() -> OnshapeCredentials:
             pass
     return OnshapeCredentials(access_key=ak, secret_key=sk)
 
-client = OnshapeClient(_load_creds())
+
+def _build_client() -> OnshapeClient:
+    """Prefer OAuth2 (bring-your-own-account) when a token exists; else API keys.
+
+    OAuth is used only when ONSHAPE_OAUTH_CLIENT_ID/SECRET are set *and* a token
+    has been stored via `cadkit-auth login`. Otherwise we fall back to the
+    existing API-key Basic auth so nothing changes for current users.
+    """
+    try:
+        from .oauth import OnshapeOAuth
+        oauth = OnshapeOAuth.from_env()
+        if oauth and oauth.has_token():
+            return OnshapeClient(
+                auth_provider=oauth.authorization_header, base_url=oauth.base_url
+            )
+    except Exception:
+        pass  # any OAuth issue → quietly fall back to API keys
+    return OnshapeClient(_load_creds())
+
+
+client = _build_client()
 quota.instrument(client)        # count every successful API call so spend is visible, not a guess
 PS = PartStudioManager(client)
 FS = FeatureScriptManager(client)

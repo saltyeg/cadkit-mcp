@@ -20,6 +20,12 @@ would betray the thesis. Reorder freely; the tiers are a recommendation, not a c
 - Dev tooling: `cadkit_mcp/devkit.py` (quota-frugal verification helpers); on-demand live smokes in `scripts/`
 - Quota visibility: the client is instrumented (`cadkit_mcp/quota.py`) to count every successful
   (2xx/3xx) call; `cad_api_calls` reports the running session + cumulative total (zero cost)
+- Auth: API-key Basic (default) **and** OAuth2 authorization-code (`cadkit_mcp/oauth.py`,
+  `cadkit-auth` CLI). The client takes a pluggable async auth provider; the server prefers a
+  stored OAuth token over API keys with silent refresh. OAuth is the prerequisite for the
+  public App-Store / bring-your-own-account model (see escape-hatches memory). Offline-tested
+  (`tests/test_cadkit_oauth.py`); not yet exercised against the live token endpoint. Note: a
+  *private* OAuth app's calls still count against the quota — exemption requires publishing.
 
 Verified working: variable-driven dimensions drive the solid (a sketch drawn at the wrong
 size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-cut holes.

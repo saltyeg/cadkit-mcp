@@ -2,9 +2,14 @@
 
 import base64
 import httpx
-from typing import Any, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, Optional
 from pydantic import BaseModel
 from loguru import logger
+
+# An auth provider is an async callable returning the full Authorization header
+# value (e.g. "Basic ..." for API keys or "Bearer ..." for OAuth2). It's awaited
+# on every request so OAuth tokens can refresh transparently.
+AuthHeaderProvider = Callable[[], Awaitable[str]]
 
 
 class OnshapeCredentials(BaseModel):
@@ -23,16 +28,39 @@ class OnshapeClient:
             result = await client.get("/api/v9/documents")
     """
 
-    def __init__(self, credentials: OnshapeCredentials):
+    def __init__(
+        self,
+        credentials: Optional[OnshapeCredentials] = None,
+        *,
+        auth_provider: Optional[AuthHeaderProvider] = None,
+        base_url: Optional[str] = None,
+    ):
         """Initialize the Onshape client.
 
+        Provide either API-key ``credentials`` (Basic auth, the default path) or
+        an ``auth_provider`` async callable that returns an Authorization header
+        value (e.g. an OAuth2 "Bearer ..." source). When using a provider with no
+        credentials, pass ``base_url`` explicitly.
+
         Args:
-            credentials: Onshape API credentials (access key and secret key)
+            credentials: Onshape API credentials (access key and secret key).
+            auth_provider: Async callable returning the Authorization header value.
+            base_url: API base URL; defaults to the credentials' base_url.
         """
         self.credentials = credentials
-        self.base_url = credentials.base_url
         self._client: Optional[httpx.AsyncClient] = None
         self._own_client = False
+
+        if auth_provider is not None:
+            self._auth_provider: AuthHeaderProvider = auth_provider
+            self.base_url = base_url or (
+                credentials.base_url if credentials else "https://cad.onshape.com"
+            )
+        elif credentials is not None:
+            self._auth_provider = self._default_basic_provider
+            self.base_url = base_url or credentials.base_url
+        else:
+            raise ValueError("OnshapeClient requires credentials or auth_provider")
 
     async def __aenter__(self):
         """Async context manager entry."""
@@ -61,6 +89,10 @@ class OnshapeClient:
         auth_string = f"{self.credentials.access_key}:{self.credentials.secret_key}"
         encoded = base64.b64encode(auth_string.encode()).decode()
         return f"Basic {encoded}"
+
+    async def _default_basic_provider(self) -> str:
+        """Default auth provider: API-key Basic auth from credentials."""
+        return self._get_auth_header()
 
     def _sanitize_for_logging(self, data: Any, max_length: int = 200) -> str:
         """Sanitize sensitive data for logging.
@@ -106,7 +138,7 @@ class OnshapeClient:
         """
         url = f"{self.base_url}{path}"
         headers = {
-            "Authorization": self._get_auth_header(),
+            "Authorization": await self._auth_provider(),
             "Accept": "application/json;charset=UTF-8; qs=0.09",
         }
 
@@ -136,7 +168,7 @@ class OnshapeClient:
         """
         url = f"{self.base_url}{path}"
         headers = {
-            "Authorization": self._get_auth_header(),
+            "Authorization": await self._auth_provider(),
             "Accept": "application/json;charset=UTF-8; qs=0.09",
             "Content-Type": "application/json;charset=UTF-8; qs=0.09",
         }
@@ -178,7 +210,7 @@ class OnshapeClient:
         """
         url = f"{self.base_url}{path}"
         headers = {
-            "Authorization": self._get_auth_header(),
+            "Authorization": await self._auth_provider(),
             "Accept": "application/json;charset=UTF-8; qs=0.09",
         }
 

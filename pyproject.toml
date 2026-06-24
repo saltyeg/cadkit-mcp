@@ -96,3 +96,4 @@ exclude_lines = [
 [project.scripts]
 onshape-mcp = "onshape_mcp.server:main"
 cadkit-mcp = "cadkit_mcp.server:main"
+cadkit-auth = "cadkit_mcp.auth_cli:main"

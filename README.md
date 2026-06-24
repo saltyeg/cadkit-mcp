@@ -83,6 +83,35 @@ You need an Onshape API access key + secret key from the
 2. the `onshape` MCP server entry already in your `~/.claude.json` (so if you've configured the
    `onshape_mcp` server, cadkit reuses those keys — you never paste them twice).
 
+See `.env.example` for all supported variables.
+
+### OAuth2 (bring your own account)
+
+cadkit also supports OAuth2 — authenticating as the *user* via their own Onshape account instead
+of API keys. This is the architecture behind the "bring-your-own-agent" model and the path to an
+App Store listing whose calls are exempt from the per-user annual quota. It's optional; API keys
+remain the default and nothing changes if you don't use it.
+
+1. Register a **Connected desktop app** (OAuth application) in the
+   [Onshape Developer Portal](https://dev-portal.onshape.com/) with:
+   - **Redirect URI** `http://localhost:8910/callback` (must match exactly)
+   - **Scopes** read, write, delete (`OAuth2Read OAuth2Write OAuth2Delete`)
+2. Put the issued credentials in `.env` (or your environment):
+   ```
+   ONSHAPE_OAUTH_CLIENT_ID=…
+   ONSHAPE_OAUTH_CLIENT_SECRET=…
+   ```
+3. Run the one-time browser handshake:
+   ```bash
+   cadkit-auth login     # opens the browser, stores tokens at ~/.cadkit/onshape_token.json
+   cadkit-auth status    # show token + expiry;  cadkit-auth logout to revoke locally
+   ```
+
+Once a token is stored, the cadkit server prefers it over API keys automatically (with silent
+refresh). **Caveat:** until the app is *published* in the App Store it's a private OAuth app, so
+calls still count against the 2,500/yr quota exactly like API keys — OAuth buys the right
+architecture, not quota relief, until launch.
+
 ### Register with Claude Code
 
 Add to `~/.claude.json` (or `~/.claude/mcp.json`). The `cadkit` entry can omit keys if the
