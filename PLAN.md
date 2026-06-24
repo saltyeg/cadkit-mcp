@@ -16,7 +16,7 @@ would betray the thesis. Reorder freely; the tiers are a recommendation, not a c
 - Variables: `cad_set_variable`, `cad_get_variables`
 - Features: `cad_extrude`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole` (simple/counterbore/countersink), `cad_revolve`, `cad_mirror`, `cad_pattern`
 - Inspection / lifecycle / I/O: `cad_measure`, `cad_delete_feature`, `cad_suppress`, `cad_edit_feature`, `cad_export`
-- Semantic selection: `cad_find_edges` (circular/concave/convex/linear/extreme), `cad_find_faces` (planar-by-normal/cylindrical/largest/smallest/extreme)
+- Semantic selection: `cad_find_edges` (circular/concave/convex/linear/extreme/on-plane), `cad_find_faces` (planar-by-normal/cylindrical/largest/smallest/extreme/adjacent-to-extreme/on-plane)
 - Dev tooling: `cadkit_mcp/devkit.py` (quota-frugal verification helpers); on-demand live smokes in `scripts/`
 - Quota visibility: the client is instrumented (`cadkit_mcp/quota.py`) to count every successful
   (2xx/3xx) call; `cad_api_calls` reports the running session + cumulative total (zero cost)
@@ -119,11 +119,16 @@ bugs the per-tool smokes could not:
   placeholder → a lopsided bore (and an oversized loose arc could split a thin wall, giving 2
   solids). `add_circle` now adds an `EQUAL` between the two arcs so one dimension drives the whole
   circle. Affected `cad_hole` *and* `cad_sketch_circle`; offline regression added.
-- **OPEN — `cad_pattern`/`cad_mirror` of a subtractive feature errors.** Feature-pattern of an
-  additive boss works (verified), but patterning a `REMOVE` hole errors and leaks a stray body
-  (our `operationType=NEW`). Idiomatic workaround in place: repeat holes via multiple centers in
-  one `cad_hole`. Real fix needs the correct op/scope for patterning a cut — discover spec-first
-  from a hand-built "pattern of a hole" reference (as we did for the additive case).
+- **FIXED (live-verified) — `cad_pattern`/`cad_mirror` of a subtractive feature.** Feature-pattern
+  of an additive boss works; patterning a `REMOVE` hole used to error and leak a stray body because
+  the builders hardcoded `operationType=NEW`. The three builders now take an `operation` arg threaded
+  from a new `operation` tool param (default `NEW`, unchanged for bosses): pass `operation="REMOVE"`
+  to pattern/mirror a hole/cut so each copy cuts instead of spawning a body. Reuses the same
+  `NewBodyOperationType` enum `cad_extrude` already emits. Offline regression pins the REMOVE path
+  (`test_pattern_mirror_of_a_cut_use_remove_operation`). **Live-verified** (`scripts/smoke_pattern_cut.py`,
+  ~7 calls): a box + REMOVE hole linear-patterned ×3 with `operation="REMOVE"` regenerates `OK` and
+  measures **1 solid** (three holes in one body, not stray solids); volume 1.4264 in³ = 1.5 box −
+  3×Ø0.25 holes, so the copies genuinely cut. The multiple-centers workaround in `cad_hole` still works.
 
 ## P3 — Selection & ergonomics
 
@@ -150,7 +155,7 @@ bugs the per-tool smokes could not:
     a 2×2 square filleted 0.5" on one corner extruded to one solid measuring 3.9463 in³ (sharp box
     = 4.0; the corner is genuinely rounded), arc/sketch/extrude all `OK`
     (`scripts/smoke_fillet_adjacency.py`, ~5 calls). Backed by builders + regression tests
-    (35 offline). ✅ *in-sketch mirror* (`cad_sketch_mirror`: reflects sketch lines across an axis
+    (38 offline). ✅ *in-sketch mirror* (`cad_sketch_mirror`: reflects sketch lines across an axis
     line, emits the copies + a MIRROR constraint). **Live-verified** (`scripts/smoke_sketch_mirror.py`,
     4 calls): a half-diamond mirrors across the Y axis into a 2.0 in³ rhombus, X bbox symmetric
     [-1,1], sketch status `OK` (MIRROR constraint accepted, not over/under-constrained). Lines only

@@ -317,26 +317,30 @@ async def _native_hole(doc, ws, elem, plane, centers, style, diameter, depth, na
 
 # Feature-based pattern/mirror: repeat whole FEATURES (patternType=FEATURE + instanceFunction),
 # not faces. Verified against hand-built examples — face-based variants errored on regenerate.
-def _mirror_json(feature_ids, plane_id: str, name: str) -> Dict[str, Any]:
+# operation matches the SEED feature's boolean: NEW for an additive boss (the copies are separate
+# new bodies), REMOVE for a cut/hole (the copies cut at each instance — NEW leaks a stray body).
+def _mirror_json(feature_ids, plane_id: str, name: str, operation: str = "NEW") -> Dict[str, Any]:
     return _feat("mirror", name, [
         _enum("patternType", "MirrorType", "FEATURE"),
-        _enum("operationType", "NewBodyOperationType", "NEW"),
+        _enum("operationType", "NewBodyOperationType", operation),
         _featlist("instanceFunction", feature_ids),
         _qlist("mirrorPlane", [plane_id])])
 
-def _linear_pattern_json(feature_ids, direction_id: str, distance, count, name: str) -> Dict[str, Any]:
+def _linear_pattern_json(feature_ids, direction_id: str, distance, count, name: str,
+                         operation: str = "NEW") -> Dict[str, Any]:
     return _feat("linearPattern", name, [
         _enum("patternType", "PatternType", "FEATURE"),
-        _enum("operationType", "NewBodyOperationType", "NEW"),
+        _enum("operationType", "NewBodyOperationType", operation),
         _featlist("instanceFunction", feature_ids),
         _qlist("directionOne", [direction_id]),
         _qty("distance", _scalar_expr(distance)),
         _qty("instanceCount", _count_expr(count), integer=True)])
 
-def _circular_pattern_json(feature_ids, axis_id: str, count, angle, name: str) -> Dict[str, Any]:
+def _circular_pattern_json(feature_ids, axis_id: str, count, angle, name: str,
+                           operation: str = "NEW") -> Dict[str, Any]:
     return _feat("circularPattern", name, [
         _enum("patternType", "PatternType", "FEATURE"),
-        _enum("operationType", "NewBodyOperationType", "NEW"),
+        _enum("operationType", "NewBodyOperationType", operation),
         _featlist("instanceFunction", feature_ids),
         _qlist("axis", [axis_id]),
         _qty("angle", _scalar_expr(angle, "deg")),
@@ -491,17 +495,21 @@ async def list_tools() -> List[Tool]:
                           "thickness": {"type": ["number", "string"]}, "name": {"type": "string"}},
                           "required": ["documentId","workspaceId","elementId","faceIds","thickness"]}),
         Tool(name="cad_mirror", description="Mirror whole features across a plane. featureIds = the features to "
-             "repeat (e.g. an extrude/hole featureId); planeId = Front/Top/Right or a face/plane id.",
+             "repeat (e.g. an extrude/hole featureId); planeId = Front/Top/Right or a face/plane id. operation matches "
+             "the seed feature: NEW (default) for an additive boss, REMOVE when mirroring a hole/cut so the copy cuts.",
              inputSchema={"type": "object", "properties": {**ds, "featureIds": {"type": "array", "items": {"type": "string"}},
-                          "planeId": {"type": "string"}, "name": {"type": "string"}},
+                          "planeId": {"type": "string"},
+                          "operation": {"type": "string", "enum": ["NEW","ADD","REMOVE","INTERSECT"]}, "name": {"type": "string"}},
                           "required": ["documentId","workspaceId","elementId","featureIds","planeId"]}),
         Tool(name="cad_pattern", description="Pattern whole features. kind=linear needs directionId (an edge) + spacing "
              "(number/#var) + count; kind=circular needs axisId (an edge) + count, evenly spaced over angle (default 360). "
-             "featureIds = the features to repeat.",
+             "featureIds = the features to repeat. operation matches the seed feature: NEW (default) for an additive boss, "
+             "REMOVE when patterning a hole/cut so each copy cuts (NEW leaks a stray body for a cut).",
              inputSchema={"type": "object", "properties": {**ds, "kind": {"type": "string", "enum": ["linear","circular"]},
                           "featureIds": {"type": "array", "items": {"type": "string"}},
                           "directionId": {"type": "string"}, "axisId": {"type": "string"},
                           "spacing": {"type": ["number", "string"]}, "angle": {"type": ["number", "string"]},
+                          "operation": {"type": "string", "enum": ["NEW","ADD","REMOVE","INTERSECT"]},
                           "count": {"type": ["integer", "string"]}, "name": {"type": "string"}},
                           "required": ["documentId","workspaceId","elementId","kind","featureIds","count"]}),
         # ---- P2: inspection, lifecycle, I/O ----
@@ -722,16 +730,17 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
         if name == "cad_mirror":
             pid = PLANES.get(a["planeId"], a["planeId"])     # accept Front/Top/Right or a face id
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
-                _mirror_json(a["featureIds"], pid, a.get("name", "Mirror")))
+                _mirror_json(a["featureIds"], pid, a.get("name", "Mirror"), a.get("operation", "NEW")))
             return _feat_result(r)
 
         if name == "cad_pattern":
+            op = a.get("operation", "NEW")
             if a["kind"] == "linear":
                 j = _linear_pattern_json(a["featureIds"], a["directionId"], a.get("spacing", 1.0),
-                                         a["count"], a.get("name", "Pattern"))
+                                         a["count"], a.get("name", "Pattern"), op)
             else:
                 j = _circular_pattern_json(a["featureIds"], a["axisId"], a["count"],
-                                           a.get("angle", 360), a.get("name", "Pattern"))
+                                           a.get("angle", 360), a.get("name", "Pattern"), op)
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"], j)
             return _feat_result(r)
 

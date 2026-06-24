@@ -42,7 +42,7 @@ A few hard-won principles are baked into the tools (the full list is in [PLAN.md
 | **Features** | `cad_extrude`, `cad_revolve`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole` (simple / counterbore / countersink) |
 | **Pattern / mirror** | `cad_mirror`, `cad_pattern` (linear + circular) — *feature-based*: repeat whole features, not faces |
 | **Inspection / lifecycle / I/O** | `cad_measure` (count/volume/bbox in one eval), `cad_delete_feature`, `cad_suppress`, `cad_edit_feature`, `cad_export` (STL/STEP/…), `cad_api_calls` (running quota counter) |
-| **Semantic selection** | `cad_find_edges` (circular / concave / linear / extreme / on-plane), `cad_find_faces` (planar-by-normal / cylindrical / largest / smallest / extreme / adjacent-to-extreme / on-plane) |
+| **Semantic selection** | `cad_find_edges` (circular / concave / convex / linear / extreme / on-plane), `cad_find_faces` (planar-by-normal / cylindrical / largest / smallest / extreme / adjacent-to-extreme / on-plane) |
 
 A sketch is one session: `cad_sketch_begin(plane=… | face=<id>)`, add entities, add geometric
 constraints + driving dimensions, then `cad_sketch_close`. `cad_pattern` / `cad_mirror` take the
@@ -135,6 +135,8 @@ cadkit_mcp/
 ├── server.py     # the cadkit tools + feature JSON builders
 ├── sketch.py     # SketchSession: entities, constraints, grounding, diagnostics
 ├── selection.py  # semantic edge/face finders (FeatureScript-backed)
+├── quota.py      # successful-call counter behind cad_api_calls
+├── hole_template.json  # 160-param native Hole feature template
 └── devkit.py     # quota-frugal live verification helpers
 onshape_mcp/       # inherited upstream server (assemblies, mates, export) — see git history
 tests/            # offline builder tests (zero-API)

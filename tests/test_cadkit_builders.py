@@ -361,6 +361,7 @@ def test_linear_pattern_is_feature_based():
     assert p["directionOne"]["queries"][0]["deterministicIds"] == ["E1"]
     assert p["distance"]["expression"] == "#d"
     assert p["instanceCount"]["expression"] == "4" and p["instanceCount"]["isInteger"] is True
+    assert p["operationType"]["value"] == "NEW"  # additive default
 
 
 def test_circular_pattern_is_feature_based():
@@ -371,6 +372,7 @@ def test_circular_pattern_is_feature_based():
     assert p["instanceFunction"]["featureIds"] == ["FEXT1"]
     assert p["axis"]["queries"][0]["deterministicIds"] == ["JNB"]
     assert p["angle"]["expression"] == "360 deg" and p["equalSpace"]["value"] is True
+    assert p["operationType"]["value"] == "NEW"
 
 
 def test_mirror_is_feature_based():
@@ -381,6 +383,17 @@ def test_mirror_is_feature_based():
     assert "faces" not in p
     assert p["instanceFunction"]["featureIds"] == ["FEXT1"]
     assert p["mirrorPlane"]["queries"][0]["deterministicIds"] == ["JEC"]
+    assert p["operationType"]["value"] == "NEW"
+
+
+def test_pattern_mirror_of_a_cut_use_remove_operation():
+    # Patterning/mirroring a hole must REMOVE at each copy — NEW leaks a stray body for a cut.
+    lin = S._linear_pattern_json(["HOLE1"], "E1", "#d", 3, "p", "REMOVE")["feature"]
+    cir = S._circular_pattern_json(["HOLE1"], "JNB", 4, 360, "c", "REMOVE")["feature"]
+    mir = S._mirror_json(["HOLE1"], "JEC", "m", "REMOVE")["feature"]
+    for f in (lin, cir, mir):
+        op = _params(f)["operationType"]
+        assert op["value"] == "REMOVE" and op["enumName"] == "NewBodyOperationType"
 
 
 # ---- P2 pure helpers ------------------------------------------------------
