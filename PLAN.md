@@ -60,7 +60,7 @@ bodies), and a cylindrical face works as a circular-pattern axis for concentric 
 2. **Hole/pattern centers as variables.** Seed bolt sits at a literal BCD coordinate and counts
    are literals (flange finding) — editing a bolt-circle variable won't move them. Thread
    `#variable`/expressions into center placement and pattern counts.
-3. **Auto-dimension-to-fully-defined helper** — ✅ *shipped (offline); oracle verify deferred.*
+3. **Auto-dimension-to-fully-defined helper** — ✅ *shipped (offline); no oracle exists.*
    `cad_sketch_analyze(apply=false)` reports `{dof, grounded, fullyDefined, hints, applied}` with
    **zero API calls** — it reasons over the session's in-memory entities + constraints. `dof` is an
    analytic estimate (entity DOF − nominal constraint removal, floored): exact for tree-like
@@ -70,10 +70,12 @@ bodies), and a cylindrical face works as a circular-pattern axis for concentric 
    circles/arcs; H/V on axis-aligned lines) — it never adds line lengths (a closed loop couples
    them) and never grounds (anchor placement is a design choice), so it can't over-constrain.
    Dimensions-only by design (no guessed geometric constraints). 6 offline builder tests.
-   **Still TODO:** the ground-truth `verify` path — whether FeatureScript exposes true solver DOF
-   is unresolved; `scripts/fs_probe_sketch_dof.md` is the zero-quota FS-console probe to settle it.
-   If exposed → `verify=true` reads exact DOF (1 call) and cross-checks the estimate; if not →
-   `verify` just confirms no WARNING and 0-DOF stays analytically asserted.
+   **Oracle-verify resolved (researched, not probed):** Onshape exposes **no** sketch DOF /
+   fully-constrained status — *not* via FeatureScript (FS-evaluated sketch entities are fixed; the
+   solver state isn't readable) and *not* via REST (Onshape forum: "no way currently to retrieve
+   the constraint status of a sketch through the API"). The only API signal is `featureStatus=
+   WARNING` on an **over**-constrained sketch — which `cad_sketch_close` already returns. So 0-DOF
+   stays analytically asserted; there is nothing to wire a `verify=true` to. Item complete.
 4. **Offset construction planes** — ✅ *shipped & live-verified.* `cad_plane(reference, offset,
    flip)` emits the `cPlane` OFFSET datum (params `cplaneType=CPlaneType OFFSET` / `offset` —
    regenerates OK), resolves the new plane's deterministic id, and returns `planeId` to feed
