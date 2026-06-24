@@ -41,9 +41,21 @@ bodies), and a cylindrical face works as a circular-pattern axis for concentric 
 
 ## P4 — Parametric-core gaps (finish the thesis)
 
-1. **Parametric sketch pattern construct.** `cad_sketch_pattern` currently emits *geometric
-   copies* (trig), not a live-linked pattern — editing the count/spacing variable won't re-pattern.
-   Discover the in-sketch pattern construct spec-first and emit the real thing.
+1. **Parametric sketch pattern construct** — ✅ *shipped for circles, live-verified.*
+   `cad_sketch_pattern` on a single **circle** now emits the real `LINEAR_PATTERN` /
+   `CIRCULAR_PATTERN` sketch constraint (`add_linked_circle_pattern`), not loose geometric copies —
+   so it's one editable pattern, not N independent circles. Lines / multi-entity still fall back to
+   geometric copies (their localInstance role schema isn't read back yet); arcs TODO.
+   Ground-truth read-back from a UI build was the method (zero guessing). Findings:
+   - **Unblocked by the single-curve circle refactor** — the construct operates on whole-circle
+     entities, which 2-arc circles couldn't supply.
+   - **Per-type role index is reversed** (verified, not a misread): linear enumerates
+     `localInstance0,k,0`=curve / `1,k,0`=center; circular `localInstance1,k`=curve / `0,k`=center.
+   - **`patterng`/`maximumpatterng` are manipulator state, not the count** — emit the constant `2`
+     (what the UI emits for both types); the real count is `patternc1` + the localInstance list.
+     Using `count-1` regenerates WARNING when `count-1 != 2` (caught live: circular count 4).
+   Live-verified (`scripts/smoke_sketch_pattern_linked.py`): circular ×4 + linear ×3 both close OK
+   (not WARNING) and extrude to 4+3=7 solids. Still TODO: count/spacing as `#variables`, lines/arcs.
 2. **Hole/pattern centers as variables.** Seed bolt sits at a literal BCD coordinate and counts
    are literals (flange finding) — editing a bolt-circle variable won't move them. Thread
    `#variable`/expressions into center placement and pattern counts.

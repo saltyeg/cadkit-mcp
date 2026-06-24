@@ -294,6 +294,126 @@ class SketchSession:
             mapping[eid] = copies
         return mapping
 
+    def add_linked_circle_pattern(self, seed_id: str, kind: str, count: int, *,
+                                  direction: Optional[Tuple[float, float]] = None,
+                                  spacing: Optional[float] = None,
+                                  center: Optional[Tuple[float, float]] = None,
+                                  angle: Optional[float] = None) -> Dict[str, Any]:
+        """A real, live-linked in-sketch pattern of ONE circle — the LINEAR_PATTERN /
+        CIRCULAR_PATTERN sketch constraint (not loose geometric copies). Editing the sketch's
+        count param re-solves all instances.
+
+        Reproduces the exact ground-truth construct read back from a UI build: copy circles under a
+        fresh namespace `{ns}.0.{k}.0`, a construction `.direction1` line (linear) or `.center`
+        pivot point (circular), and a BTMSketchConstraint-2 enumerating every instance's
+        (curve, center) as localInstance params. NOTE the role index differs by type — linear puts
+        the curve at index 0, circular at index 1 — matched here exactly. Single circle only."""
+        cdef = self._circle_def(seed_id)
+        if cdef is None:
+            raise ValueError(f"{seed_id} is not a circle (linked pattern is circle-only)")
+        if count < 2:
+            raise ValueError("pattern count must be >= 2")
+        (cx, cy), r = cdef
+        ns = self._id("pat")
+
+        # instance position + circle x-direction (rotates for circular; fixed for linear)
+        if kind == "linear":
+            if direction is None or spacing is None:
+                raise ValueError("linear pattern needs direction and spacing")
+            dx, dy = direction
+            dl = math.hypot(dx, dy)
+            if dl == 0:
+                raise ValueError("pattern direction is degenerate")
+            ux, uy = dx / dl, dy / dl
+            def place(k): return (cx + ux * spacing * k, cy + uy * spacing * k, 1.0, 0.0)
+        elif kind == "circular":
+            if center is None or angle is None:
+                raise ValueError("circular pattern needs center and angle (degrees between instances)")
+            px, py = center
+            def place(k):
+                th = math.radians(angle * k)
+                x, y = cx - px, cy - py
+                return (px + x * math.cos(th) - y * math.sin(th),
+                        py + x * math.sin(th) + y * math.cos(th),
+                        math.cos(th), math.sin(th))
+        else:
+            raise ValueError(f"unknown pattern kind {kind!r} (use 'linear' or 'circular')")
+
+        # instance k -> (curve id, center id). k=0 is the seed (kept as-is); k>=1 are new copies.
+        def ids(k):
+            if k == 0:
+                return seed_id, f"{seed_id}.center"
+            cid = f"{ns}.0.{k}.0"
+            return cid, f"{cid}.center"
+
+        copies = []
+        for k in range(1, count):
+            x, y, xdir, ydir = place(k)
+            cid, _ = ids(k)
+            self.entities.append({
+                "btType": "BTMSketchCurve-4", "entityId": cid,
+                "geometry": {"btType": "BTCurveGeometryCircle-115", "radius": r * IN,
+                             "xCenter": x * IN, "yCenter": y * IN,
+                             "xDir": xdir, "yDir": ydir, "clockwise": False},
+                "centerId": f"{cid}.center", "isConstruction": False})
+            copies.append(cid)
+
+        # the pattern's geometric driver: a construction direction line (linear) or pivot point (circular)
+        if kind == "linear":
+            self.entities.append({
+                "btType": "BTMSketchCurveSegment-155", "entityId": f"{ns}.direction1",
+                "geometry": {"btType": "BTCurveGeometryLine-117",
+                             "pntX": cx * IN, "pntY": cy * IN, "dirX": ux, "dirY": uy},
+                "isConstruction": True, "startPointId": f"{ns}.direction1.start",
+                "endPointId": f"{ns}.direction1.end", "startParam": -0.0127, "endParam": 0.0127})
+        else:
+            self.entities.append({
+                "btType": "BTMSketchPoint-158", "entityId": f"{ns}.center",
+                "x": px * IN, "y": py * IN, "isConstruction": True, "isUserPoint": True})
+
+        # the pattern constraint
+        def _qi(pid, n): return {"btType": "BTMParameterQuantity-147", "isInteger": True,
+                                 "value": 0.0, "units": "", "expression": str(int(n)), "parameterId": pid}
+        def _qf(pid, expr): return {"btType": "BTMParameterQuantity-147", "isInteger": False,
+                                    "value": 0.0, "units": "", "expression": expr, "parameterId": pid}
+        # patterng / maximumpatterng are the manipulator's gap-handle state, NOT the instance
+        # count — the ground truth emits 2 for both pattern types regardless of count, and the
+        # real count lives in patternc1 + the localInstance enumeration. Using count-1 here makes
+        # the sketch regenerate WARNING when count-1 != 2 (e.g. circular count 4); 2 is correct.
+        _GAP = 2
+        params = [_qi("patterng", _GAP), _qi("patternc1", count),
+                  _qi("previouspatternc1", count), _qi("maximumpatterng", _GAP)]
+        if kind == "linear":
+            params += [_qi("patternc2", 1), _qi("previouspatternc2", 1)]
+            for k in range(count):
+                cu, ce = ids(k)
+                params += [self._str(cu, f"localInstance0,{k},0"),
+                           self._str(ce, f"localInstance1,{k},0")]
+            params.append(self._str(f"{ns}.direction1", "localDirection1"))
+            params += [_qf("labelDistance", f"{spacing * IN}*m"),
+                       _qf("labelAngle", f"{math.atan2(uy, ux)}*rad")]
+        else:
+            params.append({"btType": "BTMParameterBoolean-144", "value": False, "parameterId": "openPattern"})
+            for k in range(count):
+                cu, ce = ids(k)
+                params += [self._str(cu, f"localInstance1,{k}"),
+                           self._str(ce, f"localInstance0,{k}")]
+            params.append(self._str(f"{ns}.center", "localPivot"))
+            params += [_qf("labelDistance", f"{math.hypot(cx - px, cy - py) * IN}*m"),
+                       _qf("labelAngle", f"{math.radians(angle)}*rad")]
+        params.append({"btType": "BTMParameterEnum-145", "namespace": "", "enumName": "SketchToolType",
+                       "value": "PATTERN", "parameterId": "sketchToolType"})
+
+        self.constraints.append({
+            "btType": "BTMSketchConstraint-2",
+            "constraintType": "LINEAR_PATTERN" if kind == "linear" else "CIRCULAR_PATTERN",
+            "entityId": f"{ns}.pattern",
+            "hasOffsetData1": False, "offsetOrientation1": False, "offsetDistance1": 0.0,
+            "hasOffsetData2": False, "offsetOrientation2": False, "offsetDistance2": 0.0,
+            "hasPierceParameter": False, "pierceParameter": 0.0, "helpParameters": [],
+            "parameters": params})
+        return {"original": seed_id, "copies": copies, "constraintId": f"{ns}.pattern"}
+
     def add_point(self, at: Tuple[float, float], construction: bool = False) -> str:
         """A standalone sketch point — used as a hole `locations` target (native Hole feature)."""
         px, py = at

@@ -626,9 +626,17 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             if name == "cad_sketch_mirror":
                 return _txt(json.dumps(s.add_mirror(a["entityIds"], a["axis"])))
             if name == "cad_sketch_pattern":
-                return _txt(json.dumps(s.add_pattern(a["entityIds"], a["kind"], a["count"],
+                ids = a["entityIds"]
+                # A single circle gets the REAL live-linked construct (LINEAR/CIRCULAR_PATTERN);
+                # lines (and multi-entity) fall back to geometric copies.
+                if len(ids) == 1 and s._circle_def(ids[0]) is not None:
+                    out = s.add_linked_circle_pattern(ids[0], a["kind"], a["count"],
                             direction=a.get("direction"), spacing=a.get("spacing"),
-                            center=a.get("center"), angle=a.get("angle"))))
+                            center=a.get("center"), angle=a.get("angle"))
+                else:
+                    out = s.add_pattern(ids, a["kind"], a["count"], direction=a.get("direction"),
+                            spacing=a.get("spacing"), center=a.get("center"), angle=a.get("angle"))
+                return _txt(json.dumps(out))
             if name == "cad_sketch_rectangle":
                 return _txt(json.dumps(s.add_rectangle(a["corner1"], a["corner2"])))
             if name == "cad_sketch_slot":

@@ -211,6 +211,71 @@ def test_pattern_rejects_bad_count_and_unpatternable_entity():
         s.add_pattern([arc], "linear", count=2, direction=[1, 0], spacing=1.0)  # arcs not yet
 
 
+def _pattern_con(s):
+    return next(k for k in s.constraints if "PATTERN" in k["constraintType"])
+
+
+def _pat_params(con):
+    # quantity params carry both value(0.0) and expression("4"); prefer the expression
+    out = {}
+    for p in con["parameters"]:
+        out[p["parameterId"]] = p["expression"] if "expression" in p else p.get("value")
+    return out
+
+
+def test_linked_circular_pattern_emits_constraint_roles_center0_curve1():
+    s = _session()
+    c = s.add_circle((1, 0), 0.1)
+    out = s.add_linked_circle_pattern(c, "circular", count=4, center=[0, 0], angle=90.0)
+    assert len(out["copies"]) == 3                       # count incl. seed -> 3 copies
+    con = _pattern_con(s)
+    assert con["constraintType"] == "CIRCULAR_PATTERN"
+    p = _pat_params(con)
+    assert p["patternc1"] == "4"                         # count
+    # circular role ordering: curve at index 1, center at index 0 (ground-truth verified)
+    assert p["localInstance1,0"] == c and p["localInstance0,0"] == f"{c}.center"
+    assert p["localInstance1,1"] == out["copies"][0]
+    assert p["localInstance0,1"] == f"{out['copies'][0]}.center"
+    assert p["localPivot"].endswith(".center")           # the construction pivot point
+    assert p["sketchToolType"] == "PATTERN"
+    # copy ids follow the {ns}.0.{k}.0 scheme
+    assert out["copies"][0].endswith(".0.1.0") and out["copies"][1].endswith(".0.2.0")
+
+
+def test_linked_linear_pattern_emits_constraint_roles_curve0_center1():
+    s = _session()
+    c = s.add_circle((0, 0), 0.25)
+    out = s.add_linked_circle_pattern(c, "linear", count=3, direction=[1, 0], spacing=1.0)
+    assert len(out["copies"]) == 2
+    con = _pattern_con(s)
+    assert con["constraintType"] == "LINEAR_PATTERN"
+    p = _pat_params(con)
+    assert p["patternc1"] == "3" and p["patternc2"] == "1"
+    # linear role ordering: curve at index 0, center at index 1 (REVERSED from circular)
+    assert p["localInstance0,0,0"] == c and p["localInstance1,0,0"] == f"{c}.center"
+    assert p["localInstance0,1,0"] == out["copies"][0]
+    assert "localDirection1" in p                         # construction direction line
+    assert p["sketchToolType"] == "PATTERN"
+
+
+def test_linked_pattern_copies_are_single_curve_circles_at_right_coords():
+    s = _session()
+    c = s.add_circle((1, 0), 0.1)
+    out = s.add_linked_circle_pattern(c, "circular", count=4, center=[0, 0], angle=90.0)
+    # the copies are real BTMSketchCurve-4 circles at 90/180/270 deg about the origin
+    pts = [_circle_center(s, cp) for cp in out["copies"]]
+    for (x, y), (ex, ey) in zip(pts, [(0, 1), (-1, 0), (0, -1)]):
+        assert abs(x - ex) < 1e-9 and abs(y - ey) < 1e-9
+
+
+def test_linked_pattern_rejects_non_circle():
+    import pytest
+    s = _session()
+    ln = s.add_line((0, 0), (1, 0))
+    with pytest.raises(ValueError):
+        s.add_linked_circle_pattern(ln, "linear", count=3, direction=[1, 0], spacing=1.0)
+
+
 # MIRROR constraint live-verified in scripts/smoke_sketch_mirror.py (half-diamond -> 2.0in^3 rhombus).
 def test_add_mirror_reflects_lines_across_axis_and_links_with_mirror_constraint():
     s = _session()
