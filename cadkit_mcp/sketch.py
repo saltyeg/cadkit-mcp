@@ -63,36 +63,23 @@ class SketchSession:
                    construction: bool = False) -> str:
         cx, cy = center
         cid = self._id("cir")
-        # Two semicircle segments form a closed, region-producing circle. The arcs already SHARE
-        # their endpoint ids — arc .a runs s->m, arc .b runs m->s — so the circle is closed by
-        # construction; no explicit coincident is needed (and the region forms regardless). An
-        # earlier version added "close" COINCIDENTs referencing `{cid}.a.end`/`{cid}.b.start`, but
-        # those derived ids don't exist (the real point ids are `{cid}.s`/`{cid}.m`), so Onshape
-        # flagged them "missing references" and the sketch regenerated with featureStatus=WARNING.
-        for tag, p0, p1 in (("a", 0.0, math.pi), ("b", math.pi, 2 * math.pi)):
-            self.entities.append({
-                "btType": "BTMSketchCurveSegment-155", "entityId": f"{cid}.{tag}",
-                "startPointId": f"{cid}.{'s' if tag=='a' else 'm'}",
-                "endPointId": f"{cid}.{'m' if tag=='a' else 's'}",
-                "startParam": p0, "endParam": p1,
-                "geometry": {"btType": "BTCurveGeometryCircle-115", "radius": radius * IN,
-                             "xCenter": cx * IN, "yCenter": cy * IN,
-                             "xDir": 1.0, "yDir": 0.0, "clockwise": False},
-                "centerId": f"{cid}.center", "isConstruction": construction,
-            })
-        # Emit the center as a real point. The arcs' `centerId` alone does NOT register `{cid}.center`
-        # as a referenceable sketch point — Onshape only exposes the derived `{cid}.a.center` — so
-        # grounding/constraining `{cid}.center` would "miss its reference" and regenerate as WARNING.
-        # A standalone BTMSketchPoint with that id unifies with the arc centers and makes the center
-        # groundable the way callers expect.
-        self.entities.append({"btType": "BTMSketchPoint-158", "entityId": f"{cid}.center",
-                              "x": cx * IN, "y": cy * IN, "isConstruction": construction})
-        # The two arcs share a center but NOT a radius — without this, a single diameter/radius
-        # dimension binds only the .a arc and leaves .b at the placeholder, yielding a lopsided
-        # "teardrop" bore (looks like a chamfer, and an oversized loose arc can split a thin wall).
-        # EQUAL ties the arcs so one dimension drives the whole circle.
-        self.constraints.append(self._con("EQUAL", f"{cid}.req",
-            [self._str(f"{cid}.a", "localFirst"), self._str(f"{cid}.b", "localSecond")]))
+        # A single closed circle — the native Onshape representation (BTMSketchCurve-4 with a
+        # centerId, exactly what the UI emits). One entity, one radius: a diameter/radius dimension
+        # binds the whole circle, and `{cid}.center` is natively referenceable. This replaced an
+        # older two-semicircle-arc form whose split radius caused a "teardrop" bore (one dim bound
+        # only the .a arc) and whose arc centers didn't expose `{cid}.center` (regenerate WARNING) —
+        # both gone now that the circle is one curve.
+        self.entities.append({
+            "btType": "BTMSketchCurve-4", "entityId": cid,
+            "geometry": {"btType": "BTCurveGeometryCircle-115", "radius": radius * IN,
+                         "xCenter": cx * IN, "yCenter": cy * IN,
+                         "xDir": 1.0, "yDir": 0.0, "clockwise": False},
+            "centerId": f"{cid}.center", "isConstruction": construction,
+        })
+        # The curve's `centerId` alone exposes `{cid}.center` as a referenceable point (this is the
+        # native form — the UI emits no separate center point). Emitting an explicit BTMSketchPoint
+        # with that same id instead regenerates as featureStatus=WARNING (a redundant/free point),
+        # so we deliberately don't.
         return cid
 
     def add_arc(self, center: Tuple[float, float], start: Tuple[float, float],
@@ -244,11 +231,12 @@ class SketchSession:
         return mapping
 
     def _circle_def(self, cid: str):
-        """(center, radius) in inches for a circle id, read off its `.a` sub-arc; None if not a circle."""
-        a = next((x for x in self.entities if x.get("entityId") == f"{cid}.a"), None)
-        if a is None or not a["geometry"]["btType"].startswith("BTCurveGeometryCircle"):
+        """(center, radius) in inches for a circle id, read off its closed curve; None if not a circle."""
+        e = next((x for x in self.entities
+                  if x.get("entityId") == cid and x.get("btType") == "BTMSketchCurve-4"), None)
+        if e is None or not e["geometry"]["btType"].startswith("BTCurveGeometryCircle"):
             return None
-        g = a["geometry"]
+        g = e["geometry"]
         return (g["xCenter"] / IN, g["yCenter"] / IN), g["radius"] / IN
 
     def add_pattern(self, entity_ids: List[str], kind: str, count: int, *,
@@ -431,9 +419,10 @@ class SketchSession:
              "enumName": "DimensionAlignment", "parameterId": "alignment"}]))
 
     def _radius_target(self, ref: str) -> str:
-        """The entity a radius/diameter dimension should bind to. A circle is two semicircle
-        arcs, so its dimension targets the `.a` sub-arc; a standalone `add_arc` IS the curve, so
-        it targets the entity itself. Decided by what actually exists — not by an id prefix."""
+        """The entity a radius/diameter dimension should bind to. A circle and a standalone
+        `add_arc` are each a single curve, so the dimension targets the entity itself. (Kept as a
+        seam: it still honors a legacy `.a` sub-arc if one ever exists, but the single-curve circle
+        has none.)"""
         ids = {e["entityId"] for e in self.entities}
         return f"{ref}.a" if f"{ref}.a" in ids else ref
 

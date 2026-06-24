@@ -76,7 +76,7 @@ def test_add_slot_emits_rect_plus_two_caps():
     # the cap circles sit at the two centres, radius = width/2
     cap_centers = []
     for e in s.entities:
-        if e["btType"].startswith("BTMSketchCurveSegment") and e["entityId"].endswith(".a"):
+        if e["btType"] == "BTMSketchCurve-4":
             g = e["geometry"]
             cap_centers.append((round(g["xCenter"] / 0.0254, 3), round(g["radius"] / 0.0254, 3)))
     assert (0.0, 0.3) in cap_centers and (2.0, 0.3) in cap_centers
@@ -113,18 +113,18 @@ def test_add_arc_swap_endpoints_gives_complementary_major_arc():
     assert abs(sweep - 3 * math.pi / 2) < 1e-9         # the major (270°) arc — CCW the other way around
 
 
-def test_radius_dim_targets_arc_entity_directly_but_circle_sub_arc():
-    # A circle's radius dim binds its `.a` sub-arc; a standalone arc has no `.a`, so the dim must
-    # bind the arc entity itself — otherwise it emits a non-existent `arc1.a` and never drives.
+def test_radius_dim_targets_circle_and_arc_entities_directly():
+    # A circle is now a single closed curve, so its radius dim binds the circle entity itself
+    # (no `.a` sub-arc); a standalone arc binds its own entity too.
     s = _session()
     cir = s.add_circle((0, 0), 0.5); s.dim_radius(cir, 0.5)
     cir_ref = [p["value"] for p in s.constraints[-1]["parameters"]
                if p["btType"].startswith("BTMParameterString")][0]
-    assert cir_ref == f"{cir}.a"
+    assert cir_ref == cir
     arc = s.add_arc((2, 0), (3, 0), (2, 1)); s.dim_radius(arc, 1.0)
     arc_ref = [p["value"] for p in s.constraints[-1]["parameters"]
                if p["btType"].startswith("BTMParameterString")][0]
-    assert arc_ref == arc          # the entity itself, not arc.a
+    assert arc_ref == arc
 
 
 def test_add_fillet_trims_lines_inserts_tangent_arc_and_drops_corner_coincident():
@@ -173,8 +173,8 @@ def test_adjacent_finder_is_structurally_a_qadjacent_face_sweep():
 
 
 def _circle_center(s, cid):
-    a = [e for e in s.entities if e.get("entityId") == f"{cid}.a"][0]
-    g = a["geometry"]
+    e = [x for x in s.entities if x.get("entityId") == cid and x["btType"] == "BTMSketchCurve-4"][0]
+    g = e["geometry"]
     return g["xCenter"] / 0.0254, g["yCenter"] / 0.0254
 
 
@@ -251,37 +251,36 @@ def test_on_plane_finders_test_thinness_and_coordinate_on_the_right_axis():
     assert sel.SOLID_EDGES in e
 
 
-def test_circle_arcs_tied_equal_so_one_dim_drives_whole_circle():
-    # REGRESSION: a circle is two semicircle arcs; without an EQUAL tying them, a single
-    # diameter/radius dim binds only the .a arc and the .b arc floats to the placeholder ->
-    # lopsided "teardrop"/chamfered bore (and an oversized loose arc can split a thin wall).
+def test_circle_is_single_closed_curve_one_radius():
+    # The circle is one native BTMSketchCurve-4 (no two semicircle arcs), so a single diameter/
+    # radius dim drives the whole circle. Replaces the old 2-arc + EQUAL form whose split radius
+    # caused the lopsided "teardrop" bore.
     s = _session()
     c = s.add_circle((1, 1), 0.5)
-    eqs = [k for k in s.constraints if k["constraintType"] == "EQUAL"]
-    tied = [k for k in eqs
-            if {p.get("value") for p in k["parameters"] if p["btType"].startswith("BTMParameterString")}
-            == {f"{c}.a", f"{c}.b"}]
-    assert tied, "add_circle must EQUAL-tie its two arcs so one dimension drives the full circle"
+    curves = [e for e in s.entities if e.get("entityId") == c]
+    assert len(curves) == 1 and curves[0]["btType"] == "BTMSketchCurve-4"
+    assert abs(curves[0]["geometry"]["radius"] - 0.5 * 0.0254) < 1e-9
+    # the old sub-arcs and the EQUAL hack must be gone
+    assert not [e for e in s.entities if e.get("entityId") in (f"{c}.a", f"{c}.b")]
+    assert not [k for k in s.constraints if k["constraintType"] == "EQUAL"]
 
 
-def test_circle_constraints_reference_only_existing_ids():
-    # REGRESSION: the old "close" coincidents referenced derived ids (cir.a.end / cir.b.start) that
-    # don't exist — the real point ids are cir.s / cir.m — so Onshape flagged "missing references"
-    # and the sketch regenerated with featureStatus=WARNING. The two arcs already share cir.s/cir.m,
-    # so no explicit close coincident is needed. Every reference a circle emits must resolve.
+def test_circle_references_resolve_and_center_is_groundable():
+    # The only ids a circle exposes are the curve itself and its center point; both must resolve.
+    # The old 2-arc form's missing-reference coincidents (cir.a.end / cir.b.start) caused WARNING.
     s = _session()
     c = s.add_circle((0, 0), 0.5)
-    valid = {f"{c}.a", f"{c}.b", f"{c}.s", f"{c}.m", f"{c}.center"}
+    s.dim_diameter(c, 1.0); s.ground_origin(f"{c}.center")
+    valid = {c, f"{c}.center"}
     refs = {p["value"] for con in s.constraints
             for p in con["parameters"] if p["btType"].startswith("BTMParameterString")}
     bad = {r for r in refs if r not in valid}
     assert not bad, f"circle constraints reference non-existent ids: {bad}"
-    # and the dead close coincidents must not reappear
-    assert not [con for con in s.constraints if con["entityId"] in (f"{c}.close1", f"{c}.close2")]
-    # the center must be a real point entity so it can be grounded/constrained (else WARNING)
-    center = next((e for e in s.entities if e.get("entityId") == f"{c}.center"), None)
-    assert center is not None and center["btType"].startswith("BTMSketchPoint"), \
-        "add_circle must emit {cid}.center as a point so the center is groundable"
+    # the center is exposed via the curve's centerId (NOT a separate point entity — that redundant
+    # point regenerates WARNING); `{c}.center` is still groundable/referenceable.
+    curve = next((e for e in s.entities if e.get("entityId") == c), None)
+    assert curve is not None and curve.get("centerId") == f"{c}.center"
+    assert not [e for e in s.entities if e.get("entityId") == f"{c}.center"]
 
 
 def test_dim_length_accepts_variable_expression():
