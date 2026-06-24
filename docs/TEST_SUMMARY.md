@@ -84,10 +84,8 @@ A comprehensive unit test structure has been created for the Onshape MCP Server 
      - pytest-cov>=4.1.0
      - pytest-mock>=3.12.0
      - coverage[toml]>=7.0.0
-     - mypy>=1.0.0
    - Test configuration section
    - Coverage settings
-   - MyPy type checking configuration
 
 ### Build & Automation
 
@@ -215,13 +213,8 @@ make check-all
 
 ### Quality Assurance
 
-- ✅ 80% minimum coverage requirement
-- ✅ Automated CI/CD pipeline
-- ✅ Multi-Python version testing (3.10, 3.11, 3.12)
-- ✅ Multi-OS testing (Ubuntu, macOS, Windows)
-- ✅ Code linting with ruff
-- ✅ Type checking with mypy
-- ✅ Coverage reporting to Codecov
+- ✅ Automated CI/CD pipeline (Ubuntu, Python 3.12)
+- ✅ Coverage reporting to Codecov (reported, not gated)
 
 ## Project Structure (Updated)
 

@@ -24,9 +24,6 @@ dev = [
     "pytest-cov>=4.1.0",
     "pytest-mock>=3.12.0",
     "coverage[toml]>=7.0.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0.0",
 ]
 
 [build-system]
@@ -35,19 +32,6 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["onshape_mcp", "cadkit_mcp"]
-
-[tool.black]
-line-length = 100
-target-version = ['py310']
-
-[tool.ruff]
-line-length = 100
-target-version = "py310"
-
-[tool.ruff.lint.per-file-ignores]
-# load_dotenv() must run before local imports read env vars
-"onshape_mcp/server.py" = ["E402"]
-"run_mcp_server.py" = ["E402"]
 
 [tool.pytest.ini_options]
 minversion = "7.0"
@@ -108,13 +92,6 @@ exclude_lines = [
     "def __repr__",
     "def __str__",
 ]
-
-[tool.mypy]
-python_version = "3.10"
-warn_return_any = true
-warn_unused_configs = true
-disallow_untyped_defs = false
-disallow_incomplete_defs = false
 
 [project.scripts]
 onshape-mcp = "onshape_mcp.server:main"

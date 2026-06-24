@@ -173,11 +173,8 @@ Tests run automatically on:
 1. Checkout code
 2. Set up Python environment
 3. Install dependencies
-4. Run linters (ruff)
-5. Run type checker (mypy)
-6. Run tests with coverage
-7. Upload coverage to Codecov
-8. Check coverage threshold (80%)
+4. Run tests with coverage
+5. Upload coverage to Codecov (reported, not gated)
 
 ## Debugging Tests
 

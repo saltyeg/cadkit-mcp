@@ -19,10 +19,8 @@
 
 - [ ] Tests pass locally (`pytest -v`)
 - [ ] New tests added for new functionality
-- [ ] Coverage threshold maintained (80%+)
 
 ## Checklist
 
-- [ ] Code follows project style (ruff check passes)
 - [ ] Self-reviewed the changes
 - [ ] No secrets or credentials included

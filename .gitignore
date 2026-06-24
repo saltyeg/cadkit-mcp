@@ -60,8 +60,6 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
-.ruff_cache/
-.mypy_cache/
 
 
 docs/PARTS_ASSEMBLY_TOOLS.md

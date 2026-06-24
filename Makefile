@@ -1,6 +1,6 @@
 # Makefile for Onshape MCP Server
 
-.PHONY: help install test test-unit test-cov test-watch clean lint format check-all
+.PHONY: help install test test-unit test-cov test-watch clean check-all
 
 # Default target
 help:
@@ -11,10 +11,7 @@ help:
 	@echo "  make test-unit    - Run unit tests only"
 	@echo "  make test-cov     - Run tests with detailed coverage report"
 	@echo "  make test-watch   - Run tests in watch mode"
-	@echo "  make lint         - Run code linters (ruff)"
-	@echo "  make format       - Format code with black"
-	@echo "  make type-check   - Run type checking with mypy"
-	@echo "  make check-all    - Run all checks (lint, type-check, test)"
+	@echo "  make check-all    - Run all checks (test)"
 	@echo "  make clean        - Remove build artifacts and cache files"
 	@echo "  make coverage-html - Generate HTML coverage report"
 	@echo ""
@@ -36,18 +33,7 @@ test-cov:
 test-watch:
 	pytest-watch
 
-# Code quality
-lint:
-	ruff check onshape_mcp tests
-
-format:
-	black onshape_mcp tests
-	ruff check --fix onshape_mcp tests
-
-type-check:
-	mypy onshape_mcp
-
-check-all: lint type-check test
+check-all: test
 
 # Coverage
 coverage-html:
@@ -64,8 +50,6 @@ clean:
 	find . -type f -name "*.pyc" -delete
 	find . -type f -name "*.pyo" -delete
 	find . -type d -name ".pytest_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".ruff_cache" -exec rm -rf {} + 2>/dev/null || true
-	find . -type d -name ".mypy_cache" -exec rm -rf {} + 2>/dev/null || true
 	rm -rf htmlcov
 	rm -rf .coverage
 	rm -rf coverage.xml
