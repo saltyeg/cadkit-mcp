@@ -269,6 +269,17 @@ def _shell_json(face_ids, thickness, name: str) -> Dict[str, Any]:
         _qty("thickness", _scalar_expr(thickness)),
         _flag("oppositeDirection", True)])  # shell inward (keep outer dimensions)
 
+def _plane_json(ref_id: str, offset, name: str, flip: bool = False) -> Dict[str, Any]:
+    """An OFFSET datum (construction) plane: the `cPlane` feature, offset a signed
+    distance from a reference plane/face. `offset` accepts a number or #variable;
+    `flip` reverses the offset direction. Lets a sketch live in mid-air (off a face
+    or a default plane), the prerequisite for stand-off bosses / lofts / mid-planes."""
+    return _feat("cPlane", name, [
+        _qlist("entities", [ref_id]),
+        _enum("cplaneType", "CPlaneType", "OFFSET"),
+        _qty("offset", _scalar_expr(offset)),
+        _flag("oppositeDirection", flip)])
+
 _HOLE_TEMPLATE = json.loads((pathlib.Path(__file__).parent / "hole_template.json").read_text())
 _HOLE_STYLE = {"simple": "SIMPLE", "counterbore": "C_BORE", "countersink": "C_SINK"}
 
@@ -381,7 +392,7 @@ async def list_tools() -> List[Tool]:
              inputSchema={"type": "object", "properties": {**ds, "name": {"type": "string"}},
                           "required": ["documentId", "workspaceId", "name"]}),
         Tool(name="cad_sketch_begin", description="Open a sketch session on a standard plane (Front/Top/Right) OR an existing "
-             "face (pass its deterministic id from cad_find_faces as `face`). Returns a sessionId.",
+             "face / datum plane (pass its deterministic id from cad_find_faces or cad_plane as `face`). Returns a sessionId.",
              inputSchema={"type": "object", "properties": {**ds, "plane": {"type": "string", "enum": list(PLANES)},
                           "face": {"type": "string"}, "name": {"type": "string"}},
                           "required": ["documentId", "workspaceId", "elementId"]}),
@@ -514,6 +525,13 @@ async def list_tools() -> List[Tool]:
              inputSchema={"type": "object", "properties": {**ds, "faceIds": {"type": "array", "items": {"type": "string"}},
                           "thickness": {"type": ["number", "string"]}, "name": {"type": "string"}},
                           "required": ["documentId","workspaceId","elementId","faceIds","thickness"]}),
+        Tool(name="cad_plane", description="Create an OFFSET datum plane: a construction plane offset a signed distance "
+             "from a reference (Front/Top/Right OR a face id from cad_find_faces). offset is inches (number) or #variable; "
+             "flip reverses the direction. Returns featureId AND planeId — pass planeId to cad_sketch_begin(face=planeId) "
+             "to sketch in mid-air (stand-off bosses, lofts, mid-planes).",
+             inputSchema={"type": "object", "properties": {**ds, "reference": {"type": "string"},
+                          "offset": {"type": ["number", "string"]}, "flip": {"type": "boolean"}, "name": {"type": "string"}},
+                          "required": ["documentId","workspaceId","elementId","reference","offset"]}),
         Tool(name="cad_mirror", description="Mirror whole features across a plane. featureIds = the features to "
              "repeat (e.g. an extrude/hole featureId); planeId = Front/Top/Right or a face/plane id. operation matches "
              "the seed feature: NEW (default) for an additive boss, REMOVE when mirroring a hole/cut so the copy cuts.",
@@ -746,6 +764,16 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             r = await PS.add_feature(a["documentId"], a["workspaceId"], a["elementId"],
                 _shell_json(a["faceIds"], a["thickness"], a.get("name", "Shell")))
             return _feat_result(r)
+
+        if name == "cad_plane":
+            doc, ws, elem = a["documentId"], a["workspaceId"], a["elementId"]
+            ref = PLANES.get(a["reference"], a["reference"])   # Front/Top/Right or a face id
+            r = await PS.add_feature(doc, ws, elem,
+                _plane_json(ref, a["offset"], a.get("name", "Plane"), a.get("flip", False)))
+            fid = r.get("feature", {}).get("featureId")
+            # resolve the construction plane's deterministic id so a sketch can target it
+            plane_ids = sel.parse_ids(await FS.evaluate(doc, ws, elem, sel.fs_plane_of_feature(fid)))
+            return _feat_result(r, planeId=(plane_ids[0] if plane_ids else None))
 
         if name == "cad_mirror":
             pid = PLANES.get(a["planeId"], a["planeId"])     # accept Front/Top/Right or a face id

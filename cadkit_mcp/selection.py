@@ -246,3 +246,17 @@ def fs_sketch_vertices(sketch_fid: str) -> str:
   }}
   return out;
 }}"""
+
+
+def fs_plane_of_feature(feature_id: str) -> str:
+    """Deterministic id of the construction plane a `cPlane` feature created — feed it to
+    a sketch's sketchPlane so the sketch lives on the datum plane. A sketch targets the
+    plane's planar FACE (the BODY id is rejected as a sketch plane), so query
+    qCreatedBy(..., EntityType.FACE)."""
+    return f"""function(context is Context, queries){{
+  var out = [];
+  for (var p in evaluateQuery(context, qCreatedBy(makeId("{feature_id}"), EntityType.FACE))){{
+    out = append(out, transientQueriesToStrings(p));
+  }}
+  return out;
+}}"""

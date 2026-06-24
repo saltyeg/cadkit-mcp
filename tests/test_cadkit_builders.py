@@ -363,6 +363,31 @@ def test_sketch_on_face_targets_face_id():
     assert plane_q["queries"][0]["deterministicIds"] == ["JABC123"]
 
 
+def test_offset_plane_emits_cplane_offset():
+    j = S._plane_json("JDC", 2.0, "p")["feature"]
+    assert j["featureType"] == "cPlane"
+    p = _params(j)
+    assert p["cplaneType"]["value"] == "OFFSET"
+    assert p["cplaneType"]["enumName"] == "CPlaneType"
+    assert p["offset"]["expression"] == "2.0 in"          # number -> inches
+    assert p["entities"]["queries"][0]["deterministicIds"] == ["JDC"]
+    assert p["oppositeDirection"]["value"] is False        # flip defaults off
+
+
+def test_offset_plane_offset_accepts_variable_and_flip():
+    j = S._plane_json("JABC", "#gap", "p", flip=True)["feature"]
+    p = _params(j)
+    assert p["offset"]["expression"] == "#gap"             # #variable passes through
+    assert p["oppositeDirection"]["value"] is True
+
+
+def test_plane_of_feature_query_targets_created_bodies():
+    from cadkit_mcp import selection as sel
+    fs = sel.fs_plane_of_feature("FID123")
+    assert 'qCreatedBy(makeId("FID123"), EntityType.FACE)' in fs
+    assert "transientQueriesToStrings" in fs
+
+
 # pattern/mirror are FEATURE-based: they repeat whole features (instanceFunction), not faces.
 # REGRESSION: the original face-based form (patternType=FACE + a `faces` query) errored on
 # regenerate. Assert the verified structure instead.

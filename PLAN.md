@@ -1,236 +1,113 @@
 # cadkit — Roadmap
 
-`cadkit` is a second MCP server (alongside `onshape_mcp`) for **idiomatic, fully-defined,
-variable-driven** CAD authoring: one sketch carries entities + geometric constraints +
-driving dimensions, grounded to the origin and parameterized by variables, with semantic
-edge/face selection so downstream features reference topology by *meaning* rather than
+`cadkit` is an MCP server (alongside `onshape_mcp`) for **idiomatic, fully-defined,
+variable-driven** CAD authoring in Onshape: one sketch carries entities + geometric
+constraints + driving dimensions, grounded to the origin and parameterized by variables, with
+semantic edge/face selection so downstream features reference topology by *meaning* rather than
 transient IDs.
 
-This roadmap is ordered so that **correctness and robustness of the parametric core come
-before feature breadth** — a wide tool that emits under-defined or non-parametric geometry
-would betray the thesis. Reorder freely; the tiers are a recommendation, not a contract.
-
-## Current state (33 tools — P0–P2 shipped, P3 in progress)
-- Document/part-studio: `cad_document_create`, `cad_part_studio_create`
-- Sketch session: `cad_sketch_begin` → `line`/`circle`/`arc`/`fillet`/`mirror`/`pattern`/`rectangle`/`polyline`/`slot` → `constrain`/`dimension` → `close`
-- Variables: `cad_set_variable`, `cad_get_variables`
-- Features: `cad_extrude`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole` (simple/counterbore/countersink), `cad_revolve`, `cad_mirror`, `cad_pattern`
-- Inspection / lifecycle / I/O: `cad_measure`, `cad_delete_feature`, `cad_suppress`, `cad_edit_feature`, `cad_export`
-- Semantic selection: `cad_find_edges` (circular/concave/convex/linear/extreme/on-plane), `cad_find_faces` (planar-by-normal/cylindrical/largest/smallest/extreme/adjacent-to-extreme/on-plane)
-- Dev tooling: `cadkit_mcp/devkit.py` (quota-frugal verification helpers); on-demand live smokes in `scripts/`
-- Quota visibility: the client is instrumented (`cadkit_mcp/quota.py`) to count every successful
-  (2xx/3xx) call; `cad_api_calls` reports the running session + cumulative total (zero cost)
-- Auth: API-key Basic (default) **and** OAuth2 authorization-code (`cadkit_mcp/oauth.py`,
-  `cadkit-auth` CLI). The client takes a pluggable async auth provider; the server prefers a
-  stored OAuth token over API keys with silent refresh. OAuth is the prerequisite for the
-  public App-Store / bring-your-own-account model (see escape-hatches memory). Offline-tested
-  (`tests/test_cadkit_oauth.py`); not yet exercised against the live token endpoint. Note: a
-  *private* OAuth app's calls still count against the quota — exemption requires publishing.
-
-Verified working: variable-driven dimensions drive the solid (a sketch drawn at the wrong
-size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-cut holes.
+Ordering principle: **correctness and robustness of the parametric core before feature
+breadth.** Tiers are a recommendation, not a contract.
 
 ---
 
-## P0 — Fix/harden the parametric core (the thesis depends on these)
+## Current state — shipped & live-verified
 
-1. **`cad_set_variable` must be idempotent (update-or-create).**
-   Today each call appends a *new* `assignVariable` feature, so re-setting a variable makes
-   a duplicate — and a duplicate placed after the sketch won't drive it. Look up an existing
-   Variable feature by name (cache `get_features`) and update in place; create only if absent.
-   *This is the single most user-visible gap (it confused the variable-editing workflow).*
+The parametric core, the P1–P3 feature set, and OAuth are done. Summary of capability:
 
-2. **Fully-defined verification.**
-   The "human pattern" claim hinges on 0-DOF sketches, but the builder can silently emit
-   under-defined ones, which the solver then places unpredictably. Add:
-   - `cad_sketch_close` returns a `degreesOfFreedom` / `fullyDefined` field.
-   - optional `require_fully_defined=true` that fails loudly (and reports which entities are
-     under-constrained) instead of shipping a fragile sketch.
+- **Authoring** — document/part-studio create; sketch session (`line`/`circle`/`arc`/`fillet`/
+  `mirror`/`pattern`/`rectangle`/`polyline`/`slot` → `constrain`/`dimension` → `close`);
+  variables (`cad_set_variable` idempotent update-or-create, `cad_get_variables`).
+- **Features** — `cad_extrude`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole`
+  (simple/counterbore/countersink), `cad_revolve`, `cad_plane` (offset datum), `cad_mirror`,
+  `cad_pattern` (linear + circular, feature-based, `operation=NEW/REMOVE`).
+- **Inspection / lifecycle / I/O** — `cad_measure` (solid count, volume, bbox in one eval),
+  `cad_delete_feature`, `cad_suppress`, `cad_edit_feature`, `cad_export` (translation request).
+- **Semantic selection** — `cad_find_edges` / `cad_find_faces` by meaning (circular/concave/
+  convex/linear/extreme/on-plane; planar-by-normal/cylindrical/largest/smallest/adjacent).
+- **Auth** — API-key Basic (default) **and** OAuth2 authorization-code (`cadkit_mcp/oauth.py`,
+  `cadkit-auth` CLI). Pluggable async auth provider on `OnshapeClient`; server prefers a stored
+  OAuth token with silent refresh + rotation. **Live-verified** end-to-end (token round-trip via
+  `/api/users/sessioninfo`, all three scopes granted).
+- **Quality** — 554 offline tests; quota instrumentation (`cad_api_calls`); on-demand live
+  smokes in `scripts/`; two full integration builds (`build_example_bracket.py`,
+  `build_example_flange.py`).
 
-3. **Parametric scalars everywhere.**
-   `cad_extrude` depth, `cad_fillet`/`cad_chamfer` radius, pattern counts/spacing currently
-   take bare floats. Accept a number **or** an expression/`#variable` (same `_expr` path the
-   dimensions already use) so depth/thickness can be driven by variables too.
-
-4. **Lightweight, quota-aware checks — NOT a broad live suite.**
-   A full live test suite is counterproductive here: every assertion is a successful call
-   against the 2,500/user/yr budget, so CI-on-push would drain it. Two proportionate layers:
-   - **Offline builder tests (free, primary).** Assert on the JSON the builders *emit* —
-     validate parameter ids/types against a cached `featurespec`, check the L-profile yields
-     6 lines + ground + expected constraints. This catches the class of bug that actually hurt
-     (the `assignVariable` wrong-`parameterId`) with **zero** API calls.
-   - **One on-demand live smoke test (~6–8 calls), run manually before a release.** Only for
-     truths offline can't prove: variable *drives* geometry, ground *pins*, concave→fillet.
-     Via `ScratchStudio` + a single `measure_fs`. No CI, not on every change.
-
-## P1 — Features needed for real parts
-
-5. **`cad_hole`** ✅ *shipped — simple + counterbore + countersink* —
-   - `style="simple"` (default): circles at the centers + a blind `REMOVE` extrude (light, no
-     extra sketch). diameter/depth accept `#variable`; multiple centers per call.
-   - `style="counterbore"` / `style="countersink"`: the **native Onshape Hole feature** (proper hole
-     with callouts, exact profile). Built from the full known-good 160-param template
-     (`cadkit_mcp/hole_template.json`) with only the meaningful fields overridden — a trimmed/guessed
-     param set regenerates to ERROR. Drive it with a points sketch (`sketch.add_point` →
-     `selection.fs_sketch_vertices` → the hole's `locations`). `up=true` flips the drill direction
-     (the feature errors "none of the holes intersected a part" if it drills away from the solid —
-     the one non-obvious gotcha, found via the Onshape UI). Verified live
-     (`scripts/smoke_counterbore.py`): counterbore → bore r=0.125 + cbore r=0.3; countersink →
-     bore + cone. Native holes regenerate with status `INFO` (an informational note), not `OK`.
-   - **Later:** tapped threads (the template already carries the tap params), two-distance chamfer,
-     and auto-picking `up` from the body's position relative to the sketch plane.
-6. **`cad_chamfer`** ✅ *shipped & verified* — equal-distance; `distance` accepts `#variable`.
-   Two-distance / distance-angle still to add (the builder already carries the extra spec params).
-7. **Sketch on a face / offset plane.** ✅ *shipped & verified* — `cad_sketch_begin(face=<id>)`
-   targets a `cad_find_faces` result; offset planes still TODO.
-8. **`cad_pattern`** (linear + circular) and **`cad_mirror`** ✅ *shipped (feature-based).*
-   Reworked from the broken face form to **feature-based**: `patternType=FEATURE` + an
-   `instanceFunction` (`BTMParameterFeatureList-1749`) holding the `featureIds` to repeat — the
-   parameter the face form lacked. Ground truth was read back from hand-built, regenerating UI
-   features (one `get_features` read, zero guessing): `MirrorType.FEATURE`/`PatternType.FEATURE`,
-   geometry refs `mirrorPlane` / `directionOne` / `axis`, `operationType=NEW`. Builders emit the
-   exact verified JSON; 3 offline regression tests pin the structure (and that the old `faces`
-   form can't reappear). `cad_mirror(featureIds, planeId)`, `cad_pattern(kind, featureIds, …)`.
-   **Live-verified** — linear + REMOVE via `scripts/smoke_pattern_cut.py`; **circular** via the
-   flange integration test (`scripts/build_example_flange.py`): a bolt hole circular-patterned ×N
-   with `operation="REMOVE"` regenerates `OK` and leaves 1 solid. The circular axis can be a
-   **cylindrical face** (e.g. the bore) — the idiomatic way to give a concentric part's pattern an
-   axis when the centerline has no physical edge.
-9. **`cad_revolve`** ✅ *shipped & verified* (region + axis edge; `angle` or full 360) and
-   **`cad_shell`** ✅ *shipped & verified* (remove faces + inward `thickness`).
-
-## P2 — Inspection, lifecycle, I/O  *(shipped & live-verified — `scripts/smoke_p2.py`)*
-
-10. **`cad_measure`** ✅ *shipped* — built on `devkit.measure_fs`: solid count, total volume,
-    and combined bounding box (min/max/size, inches) in a **single** eval. *Deferred:* mass /
-    center of mass (need the `/massproperties` REST endpoint — no material density is set today)
-    and point/edge/face distance (needs deterministic-id → query plumbing).
-11. **Feature lifecycle** — `cad_delete_feature` ✅, `cad_suppress` ✅ (flip `suppressed`,
-    update in place), `cad_edit_feature` ✅ (retarget one stored parameter — proven by editing an
-    extrude depth and watching the measured volume double). **`cad_rollback` deferred** — the
-    rollback bar is set via a distinct endpoint (`rollbackBarIndex`) not yet wrapped; lower value
-    than the rest, do it spec-first later.
-12. **`cad_export`** ✅ *shipped* — wraps the v11 translation endpoint (STL/STEP/PARASOLID/GLTF/
-    OBJ; optional `partId`). Returns the async translation request (state `ACTIVE`); polling the
-    translation to completion/download is a follow-up.
-13. **`cad_get_variables`** ✅ *shipped* — lists name + **authored expression** by scanning the
-    `assignVariable` features (one API call, unit-faithful — avoids the metre/inch ambiguity of
-    resolving `getVariable`, and the `/variables` REST endpoint 404s on this tier anyway).
-
-## Findings from the full-part integration test (`scripts/build_example_bracket.py`)
-
-The angle-bracket build composes ~14 tools and self-checks by asserting measured geometry
-against the variables (incl. editing `#leg` and confirming the solid grows). It surfaced two
-bugs the per-tool smokes could not:
-
-- **FIXED — teardrop/chamfered bore.** A circle is two semicircle arcs sharing a center but not
-  a radius; a single diameter/radius dimension bound only the `.a` arc, leaving `.b` at the
-  placeholder → a lopsided bore (and an oversized loose arc could split a thin wall, giving 2
-  solids). `add_circle` now adds an `EQUAL` between the two arcs so one dimension drives the whole
-  circle. Affected `cad_hole` *and* `cad_sketch_circle`; offline regression added.
-- **FIXED (live-verified) — `cad_pattern`/`cad_mirror` of a subtractive feature.** Feature-pattern
-  of an additive boss works; patterning a `REMOVE` hole used to error and leak a stray body because
-  the builders hardcoded `operationType=NEW`. The three builders now take an `operation` arg threaded
-  from a new `operation` tool param (default `NEW`, unchanged for bosses): pass `operation="REMOVE"`
-  to pattern/mirror a hole/cut so each copy cuts instead of spawning a body. Reuses the same
-  `NewBodyOperationType` enum `cad_extrude` already emits. Offline regression pins the REMOVE path
-  (`test_pattern_mirror_of_a_cut_use_remove_operation`). **Live-verified** (`scripts/smoke_pattern_cut.py`,
-  ~7 calls): a box + REMOVE hole linear-patterned ×3 with `operation="REMOVE"` regenerates `OK` and
-  measures **1 solid** (three holes in one body, not stray solids); volume 1.4264 in³ = 1.5 box −
-  3×Ø0.25 holes, so the copies genuinely cut. The multiple-centers workaround in `cad_hole` still works.
-
-## Findings from the second integration test (`scripts/build_example_flange.py`)
-
-A variable-driven **pipe flange** — base plate (extrude NEW) + raised hub (extrude ADD) + central
-bore + an N-bolt circle — composes ~24 tools and self-checks measured geometry against the variables
-(24/24 live). It deliberately exercises what the bracket doesn't, and **live-verified** two things
-offline couldn't:
-
-- **Circular `cad_pattern(operation="REMOVE")` regenerates `OK`** and leaves 1 solid — the first live
-  exercise of a circular feature-pattern with a real axis, and confirmation the operation-param fix
-  holds for the circular path as well as the linear one.
-- **A cylindrical face works as the circular-pattern axis.** A concentric part's centerline has no
-  physical edge, so the bolt circle is patterned about the **bore's cylindrical face**
-  (`cad_find_faces(kind="cylindrical", radius=…)` → `axisId`). This is the idiomatic axis source for
-  concentric patterns; worth a README note. *Minor non-parametric spot:* the seed bolt sits at a
-  literal BCD coordinate and the count is a literal (hole centers/pattern counts aren't variables),
-  so editing a bolt-circle variable wouldn't move them — the dimensioned diameters/heights do drive.
-- **FIXED — every `add_circle` sketch regenerated with `featureStatus=WARNING`** ("a constraint has
-  missing references"; the part still built). Two latent causes in `add_circle`, both surfaced by
-  inspecting the flange's full-circle profiles and confirmed by reading back `featureStates`:
-  (1) the two "close" coincidents referenced derived endpoint ids (`cir.a.end`/`cir.b.start`) that
-  don't exist — the real point ids are `cir.s`/`cir.m`, and the arcs already share them, so the
-  coincidents were both broken *and* redundant; removed. (2) grounding/constraining the center failed
-  because `cir.center` (only an arc `centerId`) isn't a referenceable point — Onshape exposes just the
-  derived `cir.a.center`. Empirically (`featureStatus` of 4 variants on a live scratch): ground
-  `cir.center` → WARNING, ground `cir.a.center` → OK, **explicit `BTMSketchPoint` `cir.center` + ground
-  → OK**, `FIX cir.center` → WARNING. Fix = emit the center as a real point so `cir.center` resolves.
-  Was masked because `cad_hole` returns the *extrude's* status (OK), not the sketch's, and cadkit's
-  local `diagnostics()` checks emitted constraints, not Onshape's verdict. Now: disk + hole + all
-  flange sketches regenerate `OK`; offline `test_circle_constraints_reference_only_existing_ids` pins it.
-
-## P3 — Selection & ergonomics
-
-14. **Richer semantic selection** — ✅ *largest/smallest face by area, faces/edges by extreme
-    position* (`cad_find_faces` kind=largest/smallest/extreme, `cad_find_edges` kind=extreme —
-    axis+max, e.g. "the top face", "all bottom edges"). ✅ *by adjacency*
-    (`cad_find_faces` kind=adjacent_to_extreme — the faces bordering the extreme face, composed in
-    one eval so no transient id is round-tripped). **Live-verified** — the `qAdjacent(query,
-    AdjacencyType.EDGE, EntityType.FACE)` signature returned the 5 side faces of a filleted box
-    (`scripts/smoke_fillet_adjacency.py`); qAdjacent already excludes the seed. ✅ *on a given plane*
-    (`cad_find_faces`/`cad_find_edges` kind=on_plane, axis+coordinate — the planar face / all edges
-    lying in axis=coord, e.g. Z=0; tests thin-along-axis AND at-coord). Built on `evBox3d`, the same
-    primitive `fs_extreme_*` live-verified, so offline-confident without a separate smoke. Still TODO:
-    by tag. (FS gotcha: divide out units before comparing — see [[onshape-feature-errors]].)
-15. **Sketch ergonomics** — ✅ *slot* (`cad_sketch_slot`: obround = rectangle + a circle each end,
-    extrude-unions to one clean solid — verified 2.6×0.6), ✅ *construction geometry* exposed on
-    line + circle + arc, and ✅ *center-point arc* (`cad_sketch_arc`: one BTMSketchCurveSegment on a
-    partial-angle circle geometry — same proven parameterization as `add_circle`'s semicircles;
-    CCW start→end, swap endpoints for the complementary arc; radius/diameter dims now bind the arc
-    entity directly while a circle still binds its `.a` sub-arc) and ✅ *sketch fillet*
-    (`cad_sketch_fillet`: rounds the corner where two lines meet — pure trig, tangent points
-    r/tan(θ/2) along each line, arc center on the bisector at r/sin(θ/2); trims both lines, drops
-    the old corner coincident, inserts the arc + tangent constraints). **Live-verified** —
-    a 2×2 square filleted 0.5" on one corner extruded to one solid measuring 3.9463 in³ (sharp box
-    = 4.0; the corner is genuinely rounded), arc/sketch/extrude all `OK`
-    (`scripts/smoke_fillet_adjacency.py`, ~5 calls). Backed by builders + regression tests
-    (38 offline). ✅ *in-sketch mirror* (`cad_sketch_mirror`: reflects sketch lines across an axis
-    line, emits the copies + a MIRROR constraint). **Live-verified** (`scripts/smoke_sketch_mirror.py`,
-    4 calls): a half-diamond mirrors across the Y axis into a 2.0 in³ rhombus, X bbox symmetric
-    [-1,1], sketch status `OK` (MIRROR constraint accepted, not over/under-constrained). Lines only
-    so far (arcs/circles a follow-up); edit-propagation not separately exercised. ✅ *in-sketch
-    pattern* (`cad_sketch_pattern`: linear by direction+spacing, circular by center+angle —
-    repeats lines/circles as **geometric copies**, count incl. original). Pure coordinate trig
-    emitting already-verified `add_circle`/`add_line`, so offline-confident with no smoke; these
-    are geometric copies, NOT a live-linked pattern construct (a parametric sketch pattern needs the
-    pattern construct discovered spec-first). Lines+circles only (arcs a follow-up). Still TODO:
-    auto-dimension-to-fully-defined helper.
+Integration tests proved what per-tool smokes can't: variables genuinely *drive* the solid,
+ground *pins* it, concave→fillet selection holds, REMOVE-patterns cut (1 solid, not stray
+bodies), and a cylindrical face works as a circular-pattern axis for concentric parts.
 
 ---
 
-## Cross-cutting principles (learned this session; apply to every new feature)
+## P4 — Parametric-core gaps (finish the thesis)
 
-- **Spec-first, validate locally.** Before emitting a new feature type, fetch its published
-  `featurespec` once and validate parameter ids/types locally. Onshape's value parameters are
-  *type-specific and partly hidden* (the `assignVariable` bug: the visible-looking `value` field
-  is `AlwaysHidden`; the real one is `anyValue`/`lengthValue`/…). Guessing wastes time; the spec
-  is authoritative. Prototype unfamiliar JSON in the **browser FeatureScript console** (zero
-  API-key cost).
-- **Variables: `variableType=ANY` + `anyValue`** accepts any expression and is the general path.
-- **Selection over transient IDs.** Keep emitting deterministic ids via read-only FeatureScript
-  so features survive topology changes.
-- **Measure `qBodyType(...,SOLID)`, not `qEverything(BODY)`** (default planes pollute bboxes);
-  on the Front plane sketch-Y → world-Z. Both caused false "broken geometry" conclusions before;
-  `devkit` encodes the correct forms.
-- **Quota discipline.** 2,500 *successful* (`2xx`/`3xx`) calls per user per year; `429` is a
-  burst limit (pace), `402` is annual exhaustion. Reuse one studio, batch within a feature,
-  one eval per check, cache static reads. **A feature POST returning 200 with
-  `featureStatus=ERROR` is a 2xx and counts** — blind iterate-on-JSON loops are *not* free; read
-  the error in the UI instead (the browser session doesn't touch the API-key budget). Watch
-  `cad_api_calls` during live work — one bad session here spent ~594 in a day.
+1. **Parametric sketch pattern construct.** `cad_sketch_pattern` currently emits *geometric
+   copies* (trig), not a live-linked pattern — editing the count/spacing variable won't re-pattern.
+   Discover the in-sketch pattern construct spec-first and emit the real thing.
+2. **Hole/pattern centers as variables.** Seed bolt sits at a literal BCD coordinate and counts
+   are literals (flange finding) — editing a bolt-circle variable won't move them. Thread
+   `#variable`/expressions into center placement and pattern counts.
+3. **Auto-dimension-to-fully-defined helper.** A pass that reports under-constrained entities and
+   optionally adds the dimensions to reach 0-DOF, so authored sketches are robust by default.
+4. **Offset construction planes** — ✅ *shipped & live-verified.* `cad_plane(reference, offset,
+   flip)` emits the `cPlane` OFFSET datum (params `cplaneType=CPlaneType OFFSET` / `offset` —
+   regenerates OK), resolves the new plane's deterministic id, and returns `planeId` to feed
+   `cad_sketch_begin(face=planeId)`. **Gotcha (live-found):** a sketch targets the plane's planar
+   **FACE**, not its body — `qCreatedBy(makeId(fid), EntityType.FACE)` (BODY id is rejected as a
+   sketch plane). Verified: plane Top+3″ → 1×1 sketch on it → extrude → solid min-Z = 3.0 (the
+   sketch genuinely sat on the lifted plane), all features OK (`scripts/smoke_offset_plane.py`).
+   Still TODO: angle / point-defined / mid-plane datum types (this ships OFFSET only).
+
+## P5 — Feature breadth (deferred, do spec-first)
+
+5. **Hole follow-ups** — tapped threads (template already carries tap params), two-distance
+   chamfer on holes, auto-pick `up` from body-vs-plane position.
+6. **Chamfer variants** — two-distance / distance-angle (builder already carries the spec params).
+7. **`cad_rollback`** — wrap the `rollbackBarIndex` endpoint (distinct from feature add).
+8. **Export polling** — poll the async translation to completion + download (today returns the
+   `ACTIVE` request only).
+9. **Measure extensions** — mass / center of mass via `/massproperties` (needs a material density
+   set); point/edge/face distance (needs deterministic-id → query plumbing).
+10. **Selection by tag**; mirror/pattern of **arcs & circles** in-sketch (lines only today).
+
+## P6 — Productization (the bring-your-own-agent path)
+
+OAuth2 is the architectural prerequisite and is now in place. The remaining work is a *product*
+decision, not a code task — track it here so it isn't lost. See the quota escape-hatches memory.
+
+11. **Confirm the actual quota tier.** Live `sessioninfo` reports `planGroup: EDU Educator`, not
+    the student tier the 2,500/yr assumption is based on — verify the real annual ceiling with
+    Onshape before sizing anything.
+12. **App Store publication** (only if cadkit becomes a public product). A *private* OAuth app's
+    calls still count against the quota — the exemption requires publishing. Gated on the full
+    Launch Checklist (developer agreement, ≥5 beta testers, Onshape QA, store listing, support
+    SLA). Revisit only with explicit intent to ship publicly.
+13. **Cheaper headroom alternatives** (if it stays a dev tool) — buy calls via
+    `api-support@onshape.com`, or upgrade tier. Keep the offline-first discipline either way.
+
+---
+
+## Cross-cutting principles (apply to every new feature)
+
+- **Spec-first, validate locally.** Fetch a feature type's published `featurespec` once and
+  validate parameter ids/types locally before emitting. Onshape value parameters are
+  type-specific and partly hidden (the `assignVariable` bug: visible `value` is `AlwaysHidden`;
+  the real field is `anyValue`/`lengthValue`/…). Prototype unfamiliar JSON in the **browser
+  FeatureScript console** (zero API-key cost), not against the live API.
+- **Variables: `variableType=ANY` + `anyValue`** accepts any expression — the general path.
+- **Selection over transient IDs.** Emit deterministic ids via read-only FeatureScript so
+  features survive topology changes.
+- **Measure `qBodyType(...,SOLID)`, not `qEverything(BODY)`** (default planes pollute bboxes); on
+  the Front plane sketch-Y → world-Z. `devkit` encodes the correct forms.
+- **Quota discipline.** 2,500 *successful* (`2xx`/`3xx`) calls/user/year; `429` = burst (pace),
+  `402` = annual exhaustion. Reuse one studio, batch within a feature, one eval per check, cache
+  static reads. **A feature POST returning 200 with `featureStatus=ERROR` is a 2xx and counts** —
+  blind iterate-on-JSON loops are *not* free; read the error in the UI. Watch `cad_api_calls`
+  during live work (one bad session spent ~594 in a day).
 
 ## Definition of done for a feature
+
 1. featurespec fetched + parameters validated locally · 2. emits fully-defined / parametric
-output where applicable · 3. an **offline** builder assertion (validate emitted JSON; no API)
-— add to the on-demand live smoke test only if behavior can't be proven offline · 4. example in
-`examples/` and a line in the README · 5. PR targets `main`.
+output where applicable · 3. an **offline** builder assertion (no API) — add to the on-demand
+live smoke only if behavior can't be proven offline · 4. example in `examples/` + a README line ·
+5. PR targets `main`.
