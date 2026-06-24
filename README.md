@@ -155,6 +155,10 @@ by-tag next) and sketch ergonomics (slots, center-point arcs, fillets, construct
 done; in-sketch mirror live-verified; in-sketch pattern emits geometric copies). Deferred: `cad_rollback`, mass/COM in
 `cad_measure`, and tapped threads on the native Hole feature.
 
+## Notes
+
+Not tested on assemblies yet, only individual parts
+
 ## Credits
 
 Forked from [hedless/onshape-mcp](https://github.com/hedless/onshape-mcp); the `onshape_mcp`
