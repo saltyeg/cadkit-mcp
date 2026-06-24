@@ -1,9 +1,9 @@
 [project]
-name = "onshape-mcp"
+name = "cadkit-mcp"
 version = "0.3.0"
-description = "Enhanced MCP server for programmatic CAD modeling with Onshape"
+description = "cadkit + onshape MCP servers for idiomatic, fully-defined, variable-driven CAD authoring in Onshape"
 authors = [
-    {name = "hedless", email = "your-email@example.com"}
+    {name = "saltyeg"},
 ]
 readme = "README.md"
 requires-python = ">=3.10"
