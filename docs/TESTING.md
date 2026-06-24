@@ -247,10 +247,9 @@ pytest --cov=onshape_mcp --cov-report=xml
 
 ### Coverage configuration
 
-Coverage is configured in:
-- `pyproject.toml` - [tool.coverage.*]
-- `.coveragerc` - Coverage.py settings
-- `pytest.ini` - Pytest coverage options
+Coverage is configured in `pyproject.toml` (the single source of truth):
+- `[tool.pytest.ini_options]` - pytest + coverage flags via `addopts`
+- `[tool.coverage.*]` - source, omit, `fail_under`, and report settings
 
 ## Best Practices
 

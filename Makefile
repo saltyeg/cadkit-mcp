@@ -31,7 +31,7 @@ test-unit:
 	pytest -m "not integration" -v
 
 test-cov:
-	pytest --cov=onshape_mcp --cov-report=term-missing --cov-report=html -v
+	pytest --cov-report=term-missing --cov-report=html -v
 
 test-watch:
 	pytest-watch
@@ -51,11 +51,11 @@ check-all: lint type-check test
 
 # Coverage
 coverage-html:
-	pytest --cov=onshape_mcp --cov-report=html
+	pytest --cov-report=html
 	@echo "Coverage report generated in htmlcov/index.html"
 
 coverage-xml:
-	pytest --cov=onshape_mcp --cov-report=xml
+	pytest --cov-report=xml
 
 # Cleaning
 clean:
