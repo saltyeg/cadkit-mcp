@@ -66,8 +66,8 @@ cad_extrude(sketchFeatureId=sk, depth="#thick", operation="NEW")
 Both servers live in this one repo and share the same Onshape client.
 
 ```bash
-git clone https://github.com/saltyeg/onshape-mcp.git
-cd onshape-mcp
+git clone https://github.com/saltyeg/cadkit-mcp.git
+cd cadkit-mcp
 python -m venv venv && source venv/bin/activate
 pip install -e .
 ```
