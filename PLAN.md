@@ -85,8 +85,11 @@ size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-
    geometry refs `mirrorPlane` / `directionOne` / `axis`, `operationType=NEW`. Builders emit the
    exact verified JSON; 3 offline regression tests pin the structure (and that the old `faces`
    form can't reappear). `cad_mirror(featureIds, planeId)`, `cad_pattern(kind, featureIds, …)`.
-   *Optional follow-up:* an on-demand live regen smoke (~5 calls) — not run, since the emitted
-   JSON is identical to features known to regenerate.
+   **Live-verified** — linear + REMOVE via `scripts/smoke_pattern_cut.py`; **circular** via the
+   flange integration test (`scripts/build_example_flange.py`): a bolt hole circular-patterned ×N
+   with `operation="REMOVE"` regenerates `OK` and leaves 1 solid. The circular axis can be a
+   **cylindrical face** (e.g. the bore) — the idiomatic way to give a concentric part's pattern an
+   axis when the centerline has no physical edge.
 9. **`cad_revolve`** ✅ *shipped & verified* (region + axis edge; `angle` or full 360) and
    **`cad_shell`** ✅ *shipped & verified* (remove faces + inward `thickness`).
 
@@ -129,6 +132,23 @@ bugs the per-tool smokes could not:
   ~7 calls): a box + REMOVE hole linear-patterned ×3 with `operation="REMOVE"` regenerates `OK` and
   measures **1 solid** (three holes in one body, not stray solids); volume 1.4264 in³ = 1.5 box −
   3×Ø0.25 holes, so the copies genuinely cut. The multiple-centers workaround in `cad_hole` still works.
+
+## Findings from the second integration test (`scripts/build_example_flange.py`)
+
+A variable-driven **pipe flange** — base plate (extrude NEW) + raised hub (extrude ADD) + central
+bore + an N-bolt circle — composes ~24 tools and self-checks measured geometry against the variables
+(24/24 live). It deliberately exercises what the bracket doesn't, and **live-verified** two things
+offline couldn't:
+
+- **Circular `cad_pattern(operation="REMOVE")` regenerates `OK`** and leaves 1 solid — the first live
+  exercise of a circular feature-pattern with a real axis, and confirmation the operation-param fix
+  holds for the circular path as well as the linear one.
+- **A cylindrical face works as the circular-pattern axis.** A concentric part's centerline has no
+  physical edge, so the bolt circle is patterned about the **bore's cylindrical face**
+  (`cad_find_faces(kind="cylindrical", radius=…)` → `axisId`). This is the idiomatic axis source for
+  concentric patterns; worth a README note. *Minor non-parametric spot:* the seed bolt sits at a
+  literal BCD coordinate and the count is a literal (hole centers/pattern counts aren't variables),
+  so editing a bolt-circle variable wouldn't move them — the dimensioned diameters/heights do drive.
 
 ## P3 — Selection & ergonomics
 
