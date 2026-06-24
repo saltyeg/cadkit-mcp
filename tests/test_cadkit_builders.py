@@ -264,6 +264,26 @@ def test_circle_arcs_tied_equal_so_one_dim_drives_whole_circle():
     assert tied, "add_circle must EQUAL-tie its two arcs so one dimension drives the full circle"
 
 
+def test_circle_constraints_reference_only_existing_ids():
+    # REGRESSION: the old "close" coincidents referenced derived ids (cir.a.end / cir.b.start) that
+    # don't exist — the real point ids are cir.s / cir.m — so Onshape flagged "missing references"
+    # and the sketch regenerated with featureStatus=WARNING. The two arcs already share cir.s/cir.m,
+    # so no explicit close coincident is needed. Every reference a circle emits must resolve.
+    s = _session()
+    c = s.add_circle((0, 0), 0.5)
+    valid = {f"{c}.a", f"{c}.b", f"{c}.s", f"{c}.m", f"{c}.center"}
+    refs = {p["value"] for con in s.constraints
+            for p in con["parameters"] if p["btType"].startswith("BTMParameterString")}
+    bad = {r for r in refs if r not in valid}
+    assert not bad, f"circle constraints reference non-existent ids: {bad}"
+    # and the dead close coincidents must not reappear
+    assert not [con for con in s.constraints if con["entityId"] in (f"{c}.close1", f"{c}.close2")]
+    # the center must be a real point entity so it can be grounded/constrained (else WARNING)
+    center = next((e for e in s.entities if e.get("entityId") == f"{c}.center"), None)
+    assert center is not None and center["btType"].startswith("BTMSketchPoint"), \
+        "add_circle must emit {cid}.center as a point so the center is groundable"
+
+
 def test_dim_length_accepts_variable_expression():
     s = _session(); l = s.add_line((0, 0), (2, 0)); s.dim_length(l, "#leg_len")
     q = [p for p in s.constraints[-1]["parameters"] if p.get("parameterId") == "length"][0]

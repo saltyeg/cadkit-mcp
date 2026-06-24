@@ -149,6 +149,19 @@ offline couldn't:
   concentric patterns; worth a README note. *Minor non-parametric spot:* the seed bolt sits at a
   literal BCD coordinate and the count is a literal (hole centers/pattern counts aren't variables),
   so editing a bolt-circle variable wouldn't move them — the dimensioned diameters/heights do drive.
+- **FIXED — every `add_circle` sketch regenerated with `featureStatus=WARNING`** ("a constraint has
+  missing references"; the part still built). Two latent causes in `add_circle`, both surfaced by
+  inspecting the flange's full-circle profiles and confirmed by reading back `featureStates`:
+  (1) the two "close" coincidents referenced derived endpoint ids (`cir.a.end`/`cir.b.start`) that
+  don't exist — the real point ids are `cir.s`/`cir.m`, and the arcs already share them, so the
+  coincidents were both broken *and* redundant; removed. (2) grounding/constraining the center failed
+  because `cir.center` (only an arc `centerId`) isn't a referenceable point — Onshape exposes just the
+  derived `cir.a.center`. Empirically (`featureStatus` of 4 variants on a live scratch): ground
+  `cir.center` → WARNING, ground `cir.a.center` → OK, **explicit `BTMSketchPoint` `cir.center` + ground
+  → OK**, `FIX cir.center` → WARNING. Fix = emit the center as a real point so `cir.center` resolves.
+  Was masked because `cad_hole` returns the *extrude's* status (OK), not the sketch's, and cadkit's
+  local `diagnostics()` checks emitted constraints, not Onshape's verdict. Now: disk + hole + all
+  flange sketches regenerate `OK`; offline `test_circle_constraints_reference_only_existing_ids` pins it.
 
 ## P3 — Selection & ergonomics
 

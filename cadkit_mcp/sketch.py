@@ -63,7 +63,12 @@ class SketchSession:
                    construction: bool = False) -> str:
         cx, cy = center
         cid = self._id("cir")
-        # two semicircle segments form a closed, region-producing circle
+        # Two semicircle segments form a closed, region-producing circle. The arcs already SHARE
+        # their endpoint ids — arc .a runs s->m, arc .b runs m->s — so the circle is closed by
+        # construction; no explicit coincident is needed (and the region forms regardless). An
+        # earlier version added "close" COINCIDENTs referencing `{cid}.a.end`/`{cid}.b.start`, but
+        # those derived ids don't exist (the real point ids are `{cid}.s`/`{cid}.m`), so Onshape
+        # flagged them "missing references" and the sketch regenerated with featureStatus=WARNING.
         for tag, p0, p1 in (("a", 0.0, math.pi), ("b", math.pi, 2 * math.pi)):
             self.entities.append({
                 "btType": "BTMSketchCurveSegment-155", "entityId": f"{cid}.{tag}",
@@ -75,10 +80,13 @@ class SketchSession:
                              "xDir": 1.0, "yDir": 0.0, "clockwise": False},
                 "centerId": f"{cid}.center", "isConstruction": construction,
             })
-        for tag, a, b in (("close1", f"{cid}.a.end", f"{cid}.b.start"),
-                          ("close2", f"{cid}.b.end", f"{cid}.a.start")):
-            self.constraints.append(self._con("COINCIDENT", f"{cid}.{tag}",
-                [self._str(a, "localFirst"), self._str(b, "localSecond")]))
+        # Emit the center as a real point. The arcs' `centerId` alone does NOT register `{cid}.center`
+        # as a referenceable sketch point — Onshape only exposes the derived `{cid}.a.center` — so
+        # grounding/constraining `{cid}.center` would "miss its reference" and regenerate as WARNING.
+        # A standalone BTMSketchPoint with that id unifies with the arc centers and makes the center
+        # groundable the way callers expect.
+        self.entities.append({"btType": "BTMSketchPoint-158", "entityId": f"{cid}.center",
+                              "x": cx * IN, "y": cy * IN, "isConstruction": construction})
         # The two arcs share a center but NOT a radius — without this, a single diameter/radius
         # dimension binds only the .a arc and leaves .b at the placeholder, yielding a lopsided
         # "teardrop" bore (looks like a chamfer, and an oversized loose arc can split a thin wall).
