@@ -34,12 +34,12 @@ A few hard-won principles are baked into the tools (the full list is in [PLAN.md
   chosen by geometry (concave edges for fillets, a cylindrical face by radius), so a feature
   keeps referring to the right thing after the model changes.
 
-## The cadkit tools (34)
+## The cadkit tools (35)
 
 | Group | Tools |
 |---|---|
 | **Document / studio** | `cad_document_create`, `cad_part_studio_create` |
-| **Sketch session** | `cad_sketch_begin` → `cad_sketch_line` · `cad_sketch_circle` · `cad_sketch_arc` · `cad_sketch_fillet` · `cad_sketch_mirror` · `cad_sketch_pattern` · `cad_sketch_rectangle` · `cad_sketch_polyline` · `cad_sketch_slot` → `cad_sketch_constrain` · `cad_sketch_dimension` → `cad_sketch_close` |
+| **Sketch session** | `cad_sketch_begin` → `cad_sketch_line` · `cad_sketch_circle` · `cad_sketch_arc` · `cad_sketch_fillet` · `cad_sketch_mirror` · `cad_sketch_pattern` · `cad_sketch_rectangle` · `cad_sketch_polyline` · `cad_sketch_slot` → `cad_sketch_constrain` · `cad_sketch_dimension` · `cad_sketch_analyze` (DOF report / auto-dimension, offline) → `cad_sketch_close` |
 | **Variables** | `cad_set_variable` (update-or-create; no duplicates), `cad_get_variables` |
 | **Features** | `cad_extrude`, `cad_revolve`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole` (simple / counterbore / countersink), `cad_plane` (offset datum plane) |
 | **Pattern / mirror** | `cad_mirror`, `cad_pattern` (linear + circular) — *feature-based*: repeat whole features, not faces |

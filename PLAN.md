@@ -16,8 +16,9 @@ breadth.** Tiers are a recommendation, not a contract.
 The parametric core, the P1–P3 feature set, and OAuth are done. Summary of capability:
 
 - **Authoring** — document/part-studio create; sketch session (`line`/`circle`/`arc`/`fillet`/
-  `mirror`/`pattern`/`rectangle`/`polyline`/`slot` → `constrain`/`dimension` → `close`);
-  variables (`cad_set_variable` idempotent update-or-create, `cad_get_variables`).
+  `mirror`/`pattern`/`rectangle`/`polyline`/`slot` → `constrain`/`dimension` → `analyze`
+  (offline DOF report / auto-dimension) → `close`); variables (`cad_set_variable` idempotent
+  update-or-create, `cad_get_variables`).
 - **Features** — `cad_extrude`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole`
   (simple/counterbore/countersink), `cad_revolve`, `cad_plane` (offset datum), `cad_mirror`,
   `cad_pattern` (linear + circular, feature-based, `operation=NEW/REMOVE`).
@@ -29,7 +30,7 @@ The parametric core, the P1–P3 feature set, and OAuth are done. Summary of cap
   `cadkit-auth` CLI). Pluggable async auth provider on `OnshapeClient`; server prefers a stored
   OAuth token with silent refresh + rotation. **Live-verified** end-to-end (token round-trip via
   `/api/users/sessioninfo`, all three scopes granted).
-- **Quality** — 554 offline tests; quota instrumentation (`cad_api_calls`); on-demand live
+- **Quality** — 567 offline tests; quota instrumentation (`cad_api_calls`); on-demand live
   smokes in `scripts/`; two full integration builds (`build_example_bracket.py`,
   `build_example_flange.py`).
 
@@ -59,8 +60,20 @@ bodies), and a cylindrical face works as a circular-pattern axis for concentric 
 2. **Hole/pattern centers as variables.** Seed bolt sits at a literal BCD coordinate and counts
    are literals (flange finding) — editing a bolt-circle variable won't move them. Thread
    `#variable`/expressions into center placement and pattern counts.
-3. **Auto-dimension-to-fully-defined helper.** A pass that reports under-constrained entities and
-   optionally adds the dimensions to reach 0-DOF, so authored sketches are robust by default.
+3. **Auto-dimension-to-fully-defined helper** — ✅ *shipped (offline); oracle verify deferred.*
+   `cad_sketch_analyze(apply=false)` reports `{dof, grounded, fullyDefined, hints, applied}` with
+   **zero API calls** — it reasons over the session's in-memory entities + constraints. `dof` is an
+   analytic estimate (entity DOF − nominal constraint removal, floored): exact for tree-like
+   constraint graphs, approximate under coupling/redundancy, so it drives the `fullyDefined`
+   verdict while per-entity `hints` stay advisory. `apply=true` auto-dimensions only the **safe,
+   unambiguous** cases by locking the *current* sketched geometry (diameter on un-sized
+   circles/arcs; H/V on axis-aligned lines) — it never adds line lengths (a closed loop couples
+   them) and never grounds (anchor placement is a design choice), so it can't over-constrain.
+   Dimensions-only by design (no guessed geometric constraints). 6 offline builder tests.
+   **Still TODO:** the ground-truth `verify` path — whether FeatureScript exposes true solver DOF
+   is unresolved; `scripts/fs_probe_sketch_dof.md` is the zero-quota FS-console probe to settle it.
+   If exposed → `verify=true` reads exact DOF (1 call) and cross-checks the estimate; if not →
+   `verify` just confirms no WARNING and 0-DOF stays analytically asserted.
 4. **Offset construction planes** — ✅ *shipped & live-verified.* `cad_plane(reference, offset,
    flip)` emits the `cPlane` OFFSET datum (params `cplaneType=CPlaneType OFFSET` / `offset` —
    regenerates OK), resolves the new plane's deterministic id, and returns `planeId` to feed

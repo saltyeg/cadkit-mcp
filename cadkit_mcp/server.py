@@ -459,6 +459,14 @@ async def list_tools() -> List[Tool]:
                           "kind": {"type": "string", "enum": ["length", "radius", "diameter", "distance", "angle"]},
                           "entity": {"type": "string"}, "entity2": {"type": "string"}, "value": {}},
                           "required": ["sessionId", "kind", "entity", "value"]}),
+        Tool(name="cad_sketch_analyze", description="Report remaining degrees of freedom and what's under-constrained "
+             "(offline — no API call). Returns {dof, grounded, fullyDefined, hints, applied}. Set apply=true to "
+             "auto-dimension the safe, unambiguous cases by locking the CURRENT geometry: a diameter on every un-sized "
+             "circle/arc and horizontal/vertical on axis-aligned lines. It never adds line lengths (a closed loop "
+             "couples them) and never grounds the sketch (anchor placement is a design choice) — those stay as hints, "
+             "so apply can't over-constrain. dof is an analytic estimate (exact for tree-like constraint graphs).",
+             inputSchema={"type": "object", "properties": {"sessionId": {"type": "string"},
+                          "apply": {"type": "boolean"}}, "required": ["sessionId"]}),
         Tool(name="cad_sketch_close", description="Post the sketch as one feature; returns its featureId plus diagnostics "
              "(grounded, dimensions, wellFormed). Set require_well_formed=true to refuse (without posting) a sketch that "
              "is ungrounded or has no driving dimensions.",
@@ -611,7 +619,7 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
 
         if name in ("cad_sketch_line","cad_sketch_circle","cad_sketch_arc","cad_sketch_fillet","cad_sketch_mirror",
                     "cad_sketch_pattern","cad_sketch_rectangle","cad_sketch_polyline","cad_sketch_slot",
-                    "cad_sketch_constrain","cad_sketch_dimension","cad_sketch_close"):
+                    "cad_sketch_constrain","cad_sketch_dimension","cad_sketch_analyze","cad_sketch_close"):
             s = SESSIONS.get(a.get("sessionId"))
             if not s:
                 return _txt(f"ERROR: unknown sessionId {a.get('sessionId')}")
@@ -669,6 +677,9 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                  "diameter": lambda: s.dim_diameter(e, v), "distance": lambda: s.dim_distance(e, e2, v),
                  "angle": lambda: s.dim_angle(e, e2, v)}[k]()
                 return _txt("ok")
+            if name == "cad_sketch_analyze":
+                # Offline DOF report / auto-dimension — no API call.
+                return _txt(json.dumps(s.analyze(apply=a.get("apply", False))))
             if name == "cad_sketch_close":
                 diag = s.diagnostics()
                 if a.get("require_well_formed") and not diag["wellFormed"]:

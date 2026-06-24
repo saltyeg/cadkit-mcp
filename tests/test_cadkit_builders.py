@@ -42,6 +42,65 @@ def test_diagnostics_wellformed_when_grounded_and_dimensioned():
     assert d["grounded"] and d["dimensions"] == 1 and d["wellFormed"]
 
 
+# ---- analyze() / auto-dimension (P4-3) ------------------------------------
+def _grounded_dimensioned_rect(s, c1=(0, 0), c2=(2, 1)):
+    """A rectangle that reaches 0-DOF: 4 lines + corners + H/V, grounded, width+height."""
+    r = s.add_rectangle(c1, c2)
+    s.ground_origin(f"{r['bottom']}.start")   # corner at c1 pinned to origin
+    s.dim_length(r["bottom"], abs(c2[0] - c1[0]))
+    s.dim_length(r["right"], abs(c2[1] - c1[1]))
+    return r
+
+
+def test_analyze_lone_circle_reports_three_dof_and_proposes_diameter():
+    s = _session(); cid = s.add_circle((0, 0), 0.5)
+    a = s.analyze()
+    assert a["dof"] == 3 and a["grounded"] is False and a["fullyDefined"] is False
+    sizes = [h for h in a["hints"] if h.get("entityId") == cid and h["category"] == "size"]
+    assert sizes and sizes[0]["propose"] == "diameter"
+    assert any(h.get("category") == "location" for h in a["hints"])
+    assert a["applied"] == []  # report mode never mutates
+
+
+def test_analyze_apply_locks_current_diameter_and_shrinks_dof():
+    s = _session(); cid = s.add_circle((0, 0), 0.5)
+    a = s.analyze(apply=True)
+    assert a["applied"] == [{"entityId": cid, "dim": "diameter", "value": 1.0}]
+    assert any(c["constraintType"] == "DIAMETER" for c in s.constraints)
+    assert a["dof"] == 2  # diameter removed 1; center still free + ungrounded
+    assert a["fullyDefined"] is False  # apply never grounds (placement is a design choice)
+
+
+def test_analyze_ungrounded_rectangle_has_four_dof():
+    s = _session(); s.add_rectangle((0, 0), (2, 1))
+    a = s.analyze()
+    assert a["dof"] == 4 and a["grounded"] is False
+
+
+def test_analyze_grounded_dimensioned_rectangle_is_fully_defined():
+    s = _session(); _grounded_dimensioned_rect(s)
+    a = s.analyze()
+    assert a["dof"] == 0 and a["fullyDefined"] is True
+    assert not any(h.get("category") in ("size", "orientation") for h in a["hints"])
+
+
+def test_analyze_apply_never_adds_line_lengths_or_overconstrains_a_rect():
+    s = _session(); _grounded_dimensioned_rect(s)
+    n_before = len(s.constraints)
+    a = s.analyze(apply=True)  # lines already H/V, no circles -> nothing safe to add
+    assert a["applied"] == [] and len(s.constraints) == n_before
+    assert a["fullyDefined"] is True
+
+
+def test_analyze_apply_orients_axis_aligned_line_but_not_a_diagonal():
+    s = _session(); h = s.add_line((0, 0), (2, 0)); d = s.add_line((0, 0), (2, 1))
+    a = s.analyze(apply=True)
+    applied = {x["entityId"]: x["dim"] for x in a["applied"]}
+    assert applied.get(h) == "horizontal"          # axis-aligned -> safe to auto-orient
+    assert d not in applied                         # diagonal -> stays a hint, never guessed
+    assert any(x.get("entityId") == d and x["category"] == "orientation" for x in a["hints"])
+
+
 def test_native_hole_overrides_template_fields():
     locq = {"btType": "BTMIndividualQuery-138", "deterministicIds": ["II"]}
     j = S._hole_native_json(locq, ["JHD"], "countersink", "#d", 0.8, "csk",

@@ -600,6 +600,117 @@ class SketchSession:
         return {"entities": len(self.entities), "dimensions": dims,
                 "grounded": grounded, "wellFormed": grounded and dims > 0}
 
+    # ---- DOF analysis / auto-dimension (offline; PLAN P4-3) ---------------
+    # Free DOF per entity, before any constraint removes some.
+    _FREE_DOF = {"point": 2, "line": 4, "circle": 3, "arc": 5}
+    # Nominal DOF a constraint removes. Approximate (rank under coupling/redundancy
+    # isn't captured) — the *floored* total is the verdict; per-entity hints are advisory.
+    _REMOVE = {
+        "COINCIDENT": 2, "CONCENTRIC": 2, "MIDPOINT": 2, "SYMMETRIC": 2,
+        "HORIZONTAL": 1, "VERTICAL": 1, "PARALLEL": 1, "PERPENDICULAR": 1,
+        "TANGENT": 1, "EQUAL": 1, "PIERCE": 1,
+        "LENGTH": 1, "DISTANCE": 1, "RADIUS": 1, "DIAMETER": 1, "ANGLE": 1,
+    }
+
+    def _classify(self, e: Dict[str, Any]) -> str:
+        bt = e.get("btType", "")
+        if bt == "BTMSketchPoint-158":
+            return "point"
+        if bt == "BTMSketchCurve-4":
+            return "circle"
+        if bt == "BTMSketchCurveSegment-155":
+            g = e.get("geometry", {}).get("btType", "")
+            return "line" if g.startswith("BTCurveGeometryLine") else "arc"
+        return "other"
+
+    @staticmethod
+    def _ref_base(ref: str) -> str:
+        """Base entity id of a constraint ref ('ln3.start' -> 'ln3', 'cir1.center' -> 'cir1')."""
+        return ref.split(".", 1)[0]
+
+    def _con_local_targets(self, c: Dict[str, Any], id_set) -> List[str]:
+        """Local entity ids a constraint touches (external origin/plane refs excluded)."""
+        out = []
+        for p in c.get("parameters", []):
+            if p.get("btType", "").startswith("BTMParameterString"):
+                b = self._ref_base(p.get("value", ""))
+                if b in id_set:
+                    out.append(b)
+        return out
+
+    def _estimate_dof(self) -> int:
+        id_set = {e["entityId"] for e in self.entities}
+        kinds = {e["entityId"]: self._classify(e) for e in self.entities}
+        free = sum(self._FREE_DOF.get(k, 0) for k in kinds.values())
+        removed = 0
+        for c in self.constraints:
+            ct = c.get("constraintType")
+            if ct == "FIX":  # pins the whole target entity
+                for t in self._con_local_targets(c, id_set):
+                    removed += self._FREE_DOF.get(kinds.get(t, "other"), 0)
+            else:
+                removed += self._REMOVE.get(ct, 0)
+        return max(0, free - removed)
+
+    def analyze(self, apply: bool = False) -> Dict[str, Any]:
+        """Report remaining DOF and what's under-constrained; optionally auto-dimension.
+
+        Offline only — no API call. The headline `dof` is an analytic estimate (entity DOF
+        minus nominal constraint removal, floored at 0); it is exact for tree-like constraint
+        graphs and approximate under coupling/redundancy. `fullyDefined` = grounded and dof 0.
+
+        With `apply=True` it emits the *safe, unambiguous* dimensions that lock the CURRENT
+        sketched geometry (like Onshape's auto-dimension): a diameter on every un-sized
+        circle/arc, and a horizontal/vertical on every un-oriented axis-aligned line. It does
+        NOT add line lengths (a closed loop couples them — blind length dims over-constrain)
+        and does NOT ground the sketch (anchor placement is a design choice) — those stay
+        advisory `hints`. So apply can never over-constrain; it just shrinks the residual.
+        """
+        id_set = {e["entityId"] for e in self.entities}
+        kinds = {e["entityId"]: self._classify(e) for e in self.entities}
+        real = [e for e in self.entities if not e.get("isConstruction")]
+
+        touch: Dict[str, set] = {eid: set() for eid in id_set}
+        for c in self.constraints:
+            ct = c.get("constraintType")
+            for t in self._con_local_targets(c, id_set):
+                touch[t].add(ct)
+
+        applied: List[Dict[str, Any]] = []
+        hints: List[Dict[str, Any]] = []
+        for e in real:
+            eid = e["entityId"]; k = kinds[eid]; ctypes = touch[eid]
+            if k in ("circle", "arc") and not (ctypes & {"RADIUS", "DIAMETER"}):
+                if apply:
+                    dia = round(2 * e["geometry"]["radius"] / IN, 6)
+                    self.dim_diameter(eid, dia)
+                    applied.append({"entityId": eid, "dim": "diameter", "value": dia})
+                else:
+                    hints.append({"entityId": eid, "kind": k, "category": "size",
+                                  "propose": "diameter"})
+            if k == "line" and not (ctypes & {"HORIZONTAL", "VERTICAL",
+                                              "PARALLEL", "PERPENDICULAR", "ANGLE"}):
+                g = e["geometry"]
+                near_h, near_v = abs(g["dirY"]) < 1e-9, abs(g["dirX"]) < 1e-9
+                if apply and near_h:
+                    self.horizontal(eid); applied.append({"entityId": eid, "dim": "horizontal"})
+                elif apply and near_v:
+                    self.vertical(eid); applied.append({"entityId": eid, "dim": "vertical"})
+                else:
+                    hints.append({"entityId": eid, "kind": k, "category": "orientation",
+                                  "propose": "angle"})
+
+        grounded = self.diagnostics()["grounded"]
+        if not grounded:
+            hints.append({"category": "location",
+                          "message": "sketch not grounded — ground an anchor point to the origin "
+                                     "(placement is a design choice, so this is not auto-applied)"})
+
+        dof = self._estimate_dof()
+        return {"dof": dof, "grounded": grounded,
+                "fullyDefined": grounded and dof == 0,
+                "applied": applied, "hints": hints}
+
     # ---- emit --------------------------------------------------------------
     def build(self) -> Dict[str, Any]:
         return {"feature": {
