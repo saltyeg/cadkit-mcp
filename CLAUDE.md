@@ -3,8 +3,9 @@
 ## Project Conventions
 
 - **PRs target `main`.** `main` is the mainline branch.
-- Tests: `pytest` (all tests must pass). Coverage: `pytest --cov`.
-- Style: `ruff check` and `ruff format --check`.
+- Tests: `pytest` (all tests must pass). Coverage: `pytest --cov` (reported, not gated).
+- No enforced style/lint or coverage gate. `ruff`/`black`/`mypy` are available as optional
+  local tools (configured in `pyproject.toml`) but nothing requires them.
 
 ## Assembly Workflow (5-Step Methodology)
 

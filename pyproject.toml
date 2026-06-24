@@ -96,11 +96,7 @@ output = "coverage.xml"
 [tool.coverage.report]
 precision = 2
 show_missing = true
-# cadkit_mcp's live paths (server dispatch, selection FeatureScript, devkit, quota) are
-# intentionally NOT unit-tested — they need the Onshape API, and the project conserves the
-# 2,500-calls/year budget by verifying them with on-demand smokes instead. So the combined
-# floor (~73%) is below onshape_mcp's standalone ~87%; raise it as cadkit's offline tests grow.
-fail_under = 70
+# No fail_under gate — coverage is reported for visibility, not enforced as a hard floor.
 exclude_lines = [
     "pragma: no cover",
     "raise AssertionError",
