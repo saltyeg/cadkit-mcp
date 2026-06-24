@@ -368,6 +368,18 @@ async def list_tools() -> List[Tool]:
              inputSchema={"type": "object", "properties": {"sessionId": {"type": "string"}, "center": pt,
                           "radius": {"type": "number"}, "construction": {"type": "boolean"}},
                           "required": ["sessionId", "center", "radius"]}),
+        Tool(name="cad_sketch_arc", description="Add a center-point arc swept counterclockwise from `start` to `end`; "
+             "returns entityId (points are <id>.start / <id>.end). Radius is set by `start`; the end snaps to that "
+             "radius. Swap start/end for the complementary arc. construction=true for a reference arc.",
+             inputSchema={"type": "object", "properties": {"sessionId": {"type": "string"}, "center": pt,
+                          "start": pt, "end": pt, "construction": {"type": "boolean"}},
+                          "required": ["sessionId", "center", "start", "end"]}),
+        Tool(name="cad_sketch_fillet", description="Round the corner where two lines meet with a tangent arc of `radius` "
+             "(inches). Trims both lines to the tangent points, drops the corner coincident, inserts the arc, and adds "
+             "tangent constraints. Returns {arc, center, tangentPoints, radius}.",
+             inputSchema={"type": "object", "properties": {"sessionId": {"type": "string"}, "line1": {"type": "string"},
+                          "line2": {"type": "string"}, "radius": {"type": "number"}},
+                          "required": ["sessionId", "line1", "line2", "radius"]}),
         Tool(name="cad_sketch_rectangle", description="Add a constrained rectangle; returns {bottom,right,top,left} line ids.",
              inputSchema={"type": "object", "properties": {"sessionId": {"type": "string"}, "corner1": pt, "corner2": pt},
                           "required": ["sessionId", "corner1", "corner2"]}),
@@ -425,9 +437,10 @@ async def list_tools() -> List[Tool]:
                           "required": ["documentId","workspaceId","elementId","kind"]}),
         Tool(name="cad_find_faces", description="Find faces by geometry. kind: planar_by_normal (normal=[x,y,z]), cylindrical "
              "(radius+tol), largest/smallest (by area — e.g. the big flat face to sketch on), extreme (the face furthest "
-             "along axis — axis=Z max=true is the top face). Returns deterministic ids.",
+             "along axis — axis=Z max=true is the top face), adjacent_to_extreme (the faces bordering that extreme face). "
+             "Returns deterministic ids.",
              inputSchema={"type": "object", "properties": {**ds,
-                          "kind": {"type": "string", "enum": ["planar_by_normal","cylindrical","largest","smallest","extreme"]},
+                          "kind": {"type": "string", "enum": ["planar_by_normal","cylindrical","largest","smallest","extreme","adjacent_to_extreme"]},
                           "normal": {"type": "array", "items": {"type": "number"}}, "radius": {"type": "number"},
                           "axis": {"type": "string", "enum": ["X","Y","Z"]}, "max": {"type": "boolean"},
                           "tolerance": {"type": "number"}}, "required": ["documentId","workspaceId","elementId","kind"]}),
@@ -533,8 +546,8 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                                           target, a.get("name", "Sketch"))
             return _txt(json.dumps({"sessionId": sid}))
 
-        if name in ("cad_sketch_line","cad_sketch_circle","cad_sketch_rectangle","cad_sketch_polyline",
-                    "cad_sketch_slot","cad_sketch_constrain","cad_sketch_dimension","cad_sketch_close"):
+        if name in ("cad_sketch_line","cad_sketch_circle","cad_sketch_arc","cad_sketch_fillet","cad_sketch_rectangle",
+                    "cad_sketch_polyline","cad_sketch_slot","cad_sketch_constrain","cad_sketch_dimension","cad_sketch_close"):
             s = SESSIONS.get(a.get("sessionId"))
             if not s:
                 return _txt(f"ERROR: unknown sessionId {a.get('sessionId')}")
@@ -542,6 +555,10 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 return _txt(json.dumps({"entityId": s.add_line(a["start"], a["end"], a.get("construction", False))}))
             if name == "cad_sketch_circle":
                 return _txt(json.dumps({"entityId": s.add_circle(a["center"], a["radius"], a.get("construction", False))}))
+            if name == "cad_sketch_arc":
+                return _txt(json.dumps({"entityId": s.add_arc(a["center"], a["start"], a["end"], a.get("construction", False))}))
+            if name == "cad_sketch_fillet":
+                return _txt(json.dumps(s.add_fillet(a["line1"], a["line2"], a["radius"])))
             if name == "cad_sketch_rectangle":
                 return _txt(json.dumps(s.add_rectangle(a["corner1"], a["corner2"])))
             if name == "cad_sketch_slot":
@@ -624,6 +641,7 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
             elif kind == "cylindrical": script = sel.fs_cylindrical_faces(a.get("radius"), a.get("tolerance", 0.001))
             elif kind in ("largest", "smallest"): script = sel.fs_faces_by_area(kind == "largest")
             elif kind == "extreme": script = sel.fs_extreme_faces(a["axis"], a.get("max", True))
+            elif kind == "adjacent_to_extreme": script = sel.fs_faces_adjacent_to_extreme(a["axis"], a.get("max", True))
             else: return _txt(json.dumps({"error": f"unknown face kind '{kind}'"}))
             res = await FS.evaluate(a["documentId"], a["workspaceId"], a["elementId"], script)
             return _txt(json.dumps({"faceIds": sel.parse_ids(res)}))

@@ -171,6 +171,36 @@ def fs_extreme_edges(axis: str, want_max: bool = True, tol_in: float = 0.01) -> 
 }}"""
 
 
+def fs_faces_adjacent_to_extreme(axis: str, want_max: bool = True) -> str:
+    """Faces that border the extreme face along an axis — e.g. 'the side faces around the top'.
+
+    Composes a seed (the extreme face, found exactly like `fs_extreme_faces`) with the faces
+    sharing an edge with it, all in one eval so no transient id has to be round-tripped back into
+    a query.
+
+    The `qAdjacent(query, AdjacencyType.EDGE, EntityType.FACE)` signature is LIVE-VERIFIED
+    (scripts/smoke_fillet_adjacency.py: on a box it returned the side faces bordering the top
+    face). Onshape's qAdjacent already excludes the seed, so no manual subtraction is needed.
+    """
+    i = _AXIS_IDX[axis]
+    cmp = ">" if want_max else "<"
+    init = "-1e18" if want_max else "1e18"
+    return f"""function(context is Context, queries){{
+  var best; var bestV = {init};
+  for (var f in evaluateQuery(context, {SOLID_FACES})){{
+    var b = evBox3d(context, {{"topology": f}});
+    var v = (b.minCorner[{i}] + b.maxCorner[{i}]) / 2 / inch;
+    if (v {cmp} bestV){{ bestV = v; best = f; }}
+  }}
+  if (best == undefined){{ return []; }}
+  var out = [];
+  for (var nb in evaluateQuery(context, qAdjacent(best, AdjacencyType.EDGE, EntityType.FACE))){{
+    out = append(out, transientQueriesToStrings(nb));
+  }}
+  return out;
+}}"""
+
+
 def fs_sketch_vertices(sketch_fid: str) -> str:
     """Deterministic ids of the point/vertex entities a sketch created — the native Hole
     feature's `locations` are sketch points."""

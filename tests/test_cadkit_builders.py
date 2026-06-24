@@ -90,6 +90,88 @@ def test_add_point_emits_sketch_point_in_meters():
     assert abs(pt["x"] - 1.0 * 0.0254) < 1e-9 and abs(pt["y"] - 0.5 * 0.0254) < 1e-9
 
 
+def test_add_arc_emits_partial_ccw_segment_on_circle_geometry():
+    import math
+    s = _session()
+    aid = s.add_arc((0, 0), (1, 0), (0, 1))           # quarter arc, CCW
+    arc = [e for e in s.entities if e.get("entityId") == aid][0]
+    assert arc["btType"].startswith("BTMSketchCurveSegment")
+    assert arc["geometry"]["btType"].startswith("BTCurveGeometryCircle")
+    assert arc["geometry"]["clockwise"] is False       # one proven parameterization, like add_circle
+    assert abs(arc["geometry"]["radius"] - 1.0 * 0.0254) < 1e-9   # radius fixed by `start`, in metres
+    sweep = arc["endParam"] - arc["startParam"]
+    assert abs(sweep - math.pi / 2) < 1e-9             # quarter turn
+    assert 0 < sweep < 2 * math.pi                     # partial, not a full circle
+
+
+def test_add_arc_swap_endpoints_gives_complementary_major_arc():
+    import math
+    s = _session()
+    aid = s.add_arc((0, 0), (0, 1), (1, 0))           # start/end swapped from the quarter arc
+    arc = [e for e in s.entities if e.get("entityId") == aid][0]
+    sweep = arc["endParam"] - arc["startParam"]
+    assert abs(sweep - 3 * math.pi / 2) < 1e-9         # the major (270°) arc — CCW the other way around
+
+
+def test_radius_dim_targets_arc_entity_directly_but_circle_sub_arc():
+    # A circle's radius dim binds its `.a` sub-arc; a standalone arc has no `.a`, so the dim must
+    # bind the arc entity itself — otherwise it emits a non-existent `arc1.a` and never drives.
+    s = _session()
+    cir = s.add_circle((0, 0), 0.5); s.dim_radius(cir, 0.5)
+    cir_ref = [p["value"] for p in s.constraints[-1]["parameters"]
+               if p["btType"].startswith("BTMParameterString")][0]
+    assert cir_ref == f"{cir}.a"
+    arc = s.add_arc((2, 0), (3, 0), (2, 1)); s.dim_radius(arc, 1.0)
+    arc_ref = [p["value"] for p in s.constraints[-1]["parameters"]
+               if p["btType"].startswith("BTMParameterString")][0]
+    assert arc_ref == arc          # the entity itself, not arc.a
+
+
+def test_add_fillet_trims_lines_inserts_tangent_arc_and_drops_corner_coincident():
+    s = _session()
+    h = s.add_line((0, 0), (2, 0))     # ln1 — horizontal from the corner
+    v = s.add_line((0, 0), (0, 2))     # ln2 — vertical from the corner
+    s.coincident(f"{h}.start", f"{v}.start")   # the corner join a polyline/rect would have
+    out = s.add_fillet(h, v, 0.5)
+    # geometry: 90° corner, r=0.5 -> tangent points 0.5 along each line, center at (0.5,0.5)
+    assert abs(out["radius"] - 0.5) < 1e-12
+    assert abs(out["center"][0] - 0.5) < 1e-9 and abs(out["center"][1] - 0.5) < 1e-9
+    tps = sorted(out["tangentPoints"])
+    assert abs(tps[0][0] - 0.0) < 1e-9 and abs(tps[0][1] - 0.5) < 1e-9
+    assert abs(tps[1][0] - 0.5) < 1e-9 and abs(tps[1][1] - 0.0) < 1e-9
+    # the arc exists, radius 0.5in, and sits on circle geometry
+    arc = [e for e in s.entities if e.get("entityId") == out["arc"]][0]
+    assert arc["geometry"]["btType"].startswith("BTCurveGeometryCircle")
+    assert abs(arc["geometry"]["radius"] - 0.5 * 0.0254) < 1e-12
+    # both lines trimmed back to length 1.5 (2.0 - 0.5 run)
+    for ln in (h, v):
+        e = [x for x in s.entities if x.get("entityId") == ln][0]
+        assert abs(e["endParam"] / 0.0254 - 1.5) < 1e-9
+    # the old corner coincident (ln1.start==ln2.start) is gone; replaced by coincidences to the arc
+    corner = {f"{h}.start", f"{v}.start"}
+    survivors = [c for c in s.constraints if c["constraintType"] == "COINCIDENT"
+                 and {p.get("value") for p in c["parameters"] if p["btType"].startswith("BTMParameterString")} == corner]
+    assert not survivors, "fillet must drop the corner coincident so the trimmed ends aren't forced together"
+    assert sum(1 for c in s.constraints if c["constraintType"] == "TANGENT") == 2
+
+
+def test_add_fillet_rejects_radius_too_large_to_fit():
+    import pytest
+    s = _session()
+    h = s.add_line((0, 0), (1, 0)); v = s.add_line((0, 0), (0, 1))
+    with pytest.raises(ValueError):
+        s.add_fillet(h, v, 5.0)        # needs 5in of run on a 1in line
+
+
+def test_adjacent_finder_is_structurally_a_qadjacent_face_sweep():
+    # The qAdjacent signature is now LIVE-VERIFIED (smoke_fillet_adjacency.py: 5 side faces on a
+    # box). This test pins the emitted shape so a refactor can't silently break the seed sweep.
+    from cadkit_mcp import selection as sel
+    fs = sel.fs_faces_adjacent_to_extreme("Z", True)
+    assert "qAdjacent(best, AdjacencyType.EDGE, EntityType.FACE)" in fs
+    assert "evBox3d" in fs and "transientQueriesToStrings" in fs
+
+
 def test_circle_arcs_tied_equal_so_one_dim_drives_whole_circle():
     # REGRESSION: a circle is two semicircle arcs; without an EQUAL tying them, a single
     # diameter/radius dim binds only the .a arc and the .b arc floats to the placeholder ->

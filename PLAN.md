@@ -10,14 +10,16 @@ This roadmap is ordered so that **correctness and robustness of the parametric c
 before feature breadth** — a wide tool that emits under-defined or non-parametric geometry
 would betray the thesis. Reorder freely; the tiers are a recommendation, not a contract.
 
-## Current state (28 tools — P0–P2 shipped, P3 in progress)
+## Current state (31 tools — P0–P2 shipped, P3 in progress)
 - Document/part-studio: `cad_document_create`, `cad_part_studio_create`
-- Sketch session: `cad_sketch_begin` → `line`/`circle`/`rectangle`/`polyline`/`slot` → `constrain`/`dimension` → `close`
+- Sketch session: `cad_sketch_begin` → `line`/`circle`/`arc`/`fillet`/`rectangle`/`polyline`/`slot` → `constrain`/`dimension` → `close`
 - Variables: `cad_set_variable`, `cad_get_variables`
 - Features: `cad_extrude`, `cad_fillet`, `cad_chamfer`, `cad_shell`, `cad_hole` (simple/counterbore/countersink), `cad_revolve`, `cad_mirror`, `cad_pattern`
 - Inspection / lifecycle / I/O: `cad_measure`, `cad_delete_feature`, `cad_suppress`, `cad_edit_feature`, `cad_export`
 - Semantic selection: `cad_find_edges` (circular/concave/convex/linear/extreme), `cad_find_faces` (planar-by-normal/cylindrical/largest/smallest/extreme)
 - Dev tooling: `cadkit_mcp/devkit.py` (quota-frugal verification helpers); on-demand live smokes in `scripts/`
+- Quota visibility: the client is instrumented (`cadkit_mcp/quota.py`) to count every successful
+  (2xx/3xx) call; `cad_api_calls` reports the running session + cumulative total (zero cost)
 
 Verified working: variable-driven dimensions drive the solid (a sketch drawn at the wrong
 size snaps to its `#variable` values); semantic concave-edge → fillet; REMOVE-cut holes.
@@ -127,12 +129,25 @@ bugs the per-tool smokes could not:
 
 14. **Richer semantic selection** — ✅ *largest/smallest face by area, faces/edges by extreme
     position* (`cad_find_faces` kind=largest/smallest/extreme, `cad_find_edges` kind=extreme —
-    axis+max, e.g. "the top face", "all bottom edges"). Still TODO: by adjacency, by tag, on-a-given
-    plane. (FS gotcha: divide out units before comparing — see [[onshape-feature-errors]] sibling note.)
+    axis+max, e.g. "the top face", "all bottom edges"). ✅ *by adjacency*
+    (`cad_find_faces` kind=adjacent_to_extreme — the faces bordering the extreme face, composed in
+    one eval so no transient id is round-tripped). **Live-verified** — the `qAdjacent(query,
+    AdjacencyType.EDGE, EntityType.FACE)` signature returned the 5 side faces of a filleted box
+    (`scripts/smoke_fillet_adjacency.py`); qAdjacent already excludes the seed. Still TODO: by tag,
+    on-a-given plane. (FS gotcha: divide out units before comparing — see [[onshape-feature-errors]].)
 15. **Sketch ergonomics** — ✅ *slot* (`cad_sketch_slot`: obround = rectangle + a circle each end,
-    extrude-unions to one clean solid — verified 2.6×0.6) and ✅ *construction geometry* exposed on
-    line + circle. Still TODO: arcs/fillets *within* a sketch, in-sketch mirror/pattern,
-    auto-dimension-to-fully-defined helper.
+    extrude-unions to one clean solid — verified 2.6×0.6), ✅ *construction geometry* exposed on
+    line + circle + arc, and ✅ *center-point arc* (`cad_sketch_arc`: one BTMSketchCurveSegment on a
+    partial-angle circle geometry — same proven parameterization as `add_circle`'s semicircles;
+    CCW start→end, swap endpoints for the complementary arc; radius/diameter dims now bind the arc
+    entity directly while a circle still binds its `.a` sub-arc) and ✅ *sketch fillet*
+    (`cad_sketch_fillet`: rounds the corner where two lines meet — pure trig, tangent points
+    r/tan(θ/2) along each line, arc center on the bisector at r/sin(θ/2); trims both lines, drops
+    the old corner coincident, inserts the arc + tangent constraints). **Live-verified** —
+    a 2×2 square filleted 0.5" on one corner extruded to one solid measuring 3.9463 in³ (sharp box
+    = 4.0; the corner is genuinely rounded), arc/sketch/extrude all `OK`
+    (`scripts/smoke_fillet_adjacency.py`, ~5 calls). Backed by builders + regression tests
+    (32 offline). Still TODO: in-sketch mirror/pattern, auto-dimension-to-fully-defined helper.
 
 ---
 
@@ -152,7 +167,10 @@ bugs the per-tool smokes could not:
   `devkit` encodes the correct forms.
 - **Quota discipline.** 2,500 *successful* (`2xx`/`3xx`) calls per user per year; `429` is a
   burst limit (pace), `402` is annual exhaustion. Reuse one studio, batch within a feature,
-  one eval per check, cache static reads.
+  one eval per check, cache static reads. **A feature POST returning 200 with
+  `featureStatus=ERROR` is a 2xx and counts** — blind iterate-on-JSON loops are *not* free; read
+  the error in the UI instead (the browser session doesn't touch the API-key budget). Watch
+  `cad_api_calls` during live work — one bad session here spent ~594 in a day.
 
 ## Definition of done for a feature
 1. featurespec fetched + parameters validated locally · 2. emits fully-defined / parametric
