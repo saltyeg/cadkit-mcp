@@ -189,6 +189,17 @@ def test_radius_dim_targets_circle_and_arc_entities_directly():
     assert arc_ref == arc
 
 
+def test_dim_radius_value_goes_in_length_param_not_radius():
+    # Onshape reads the RADIUS dimension's driving value from parameterId "length" (like DIAMETER).
+    # With "radius" the value is ignored: arc keeps drawn radius + "could not be evaluated".
+    s = _session()
+    arc = s.add_arc((0, 0), (0.5, 0), (0, 0.5)); s.dim_radius(arc, "#bore/2")
+    qty = [p for p in s.constraints[-1]["parameters"] if p["btType"] == "BTMParameterQuantity-147"][0]
+    assert qty["parameterId"] == "length"
+    assert qty["expression"] == "#bore/2"
+    assert not any(p.get("parameterId") == "radius" for p in s.constraints[-1]["parameters"])
+
+
 def test_add_fillet_trims_lines_inserts_tangent_arc_and_drops_corner_coincident():
     s = _session()
     h = s.add_line((0, 0), (2, 0))     # ln1 — horizontal from the corner
@@ -302,6 +313,33 @@ def test_linked_circular_pattern_emits_constraint_roles_center0_curve1():
     assert p["sketchToolType"] == "PATTERN"
     # copy ids follow the {ns}.0.{k}.0 scheme
     assert out["copies"][0].endswith(".0.1.0") and out["copies"][1].endswith(".0.2.0")
+
+
+def test_circular_pattern_pivot_is_grounded_to_origin():
+    # The pivot is an otherwise-free user point; without a constraint it floats with 2 DOF
+    # and drags the whole ring (live-observed). A pivot at the origin must be coincident to it.
+    s = _session()
+    c = s.add_circle((1, 0), 0.1)
+    s.add_linked_circle_pattern(c, "circular", count=4, center=[0, 0], angle=90.0)
+    grounds = [k for k in s.constraints
+               if k["constraintType"] == "COINCIDENT" and k["entityId"].startswith("patgnd")]
+    assert len(grounds) == 1, "pivot at origin must be grounded with exactly one coincident"
+    params = grounds[0]["parameters"]
+    ext = next(p for p in params if p["btType"] == "BTMParameterQueryList-148")
+    assert ext["queries"][0]["deterministicIds"] == [ORIGIN_VERTEX]   # the part-studio origin
+    loc = next(p for p in params if p["btType"] == "BTMParameterString-149")
+    assert loc["value"].endswith(".center")                           # the pivot point
+
+
+def test_circular_pattern_pivot_off_origin_is_fixed():
+    # An off-origin pivot can't ground to the origin vertex; it must be FIXed at its coords.
+    s = _session()
+    c = s.add_circle((3, 0), 0.1)
+    s.add_linked_circle_pattern(c, "circular", count=3, center=[2, 0], angle=120.0)
+    fixes = [k for k in s.constraints
+             if k["constraintType"] == "FIX" and k["entityId"].startswith("patfix")]
+    assert len(fixes) == 1
+    assert fixes[0]["parameters"][0]["value"].endswith(".center")
 
 
 def test_linked_linear_pattern_emits_constraint_roles_curve0_center1():

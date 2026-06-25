@@ -24,9 +24,11 @@ Defaults: 6 mm D-shaft, 16 mm OD, 12 mm long, 10 mm bolt circle, 4 × M3-clearan
 Budget: ~19 successful API calls. Fresh part studio in the existing test doc.
 Run ONCE: on any non-OK status, read the per-step output — do not blind-retry.
 
-Live-verified 2026-06-25 (element c14d49231a2e152eb505698b): 1 solid, all features OK except the
-benign D-bore WARNING; holes clocked 45° clear the set screw (volume 0.10144 in^3, lower than the
-colliding 0°-hole build's 0.10264 because the screw and a hole no longer overlap).
+Holes clocked 45° clear the set screw. The earlier "benign D-bore WARNING" was NOT benign — it was
+the dim_radius bug (radius value posted under parameterId "radius", which Onshape ignores, so the
+bore was never driven by #bore). Fixed in cadkit (radius value now in parameterId "length"); the
+D-bore + mount sketches close OK and fully constrained as of 2026-06-25 (verify element
+142e1818d4d3dc73cf6f467b). The mount circular pattern now grounds its pivot to the origin.
 """
 import asyncio
 import json
@@ -84,10 +86,18 @@ async def main():
                      depth="#length", operation="NEW", name="body")
     status["body"] = (a1.get("fullyDefined"), close.get("status"), ext.get("status"))
 
-    # ---- 2. D-bore : major arc + chord, flat located by a horizontal dim ----
+    # ---- 2. D-bore : major arc + chord, flat pinned by vertical + origin->point dim ----
+    # The flat is held by (a) a `vertical` chord and (b) a horizontal origin->point dimension
+    # (dim_position x=#flat_x) on the lower chord end: vertical propagates the x-pin to the upper
+    # end, both ends ride the radius-#bore/2 circle, so the flat length is fully determined.
+    # History (all live-observed on element 142e1818...): the original used a point-to-POINT
+    # horizontal distance (arc.center->chord.start) — that dimension regenerated "could not be
+    # evaluated" and never pinned the x, leaving the flat length free. A `symmetric` (MIRROR)
+    # rebuild went RED — Onshape's MIRROR constraint posts without a 400 but does NOT solve as a
+    # point-symmetry constraint. dim_position (the same origin->point primitive the set screw
+    # uses cleanly) is what finally pins it.
     beg = await call("cad_sketch_begin", elementId=elem, plane="Top", name="D-bore")
     sid = beg["sessionId"]
-    r0 = BORE / 2 * MM
     arc = await call("cad_sketch_arc", elementId=elem, sessionId=sid, center=[0.0, 0.0],
                      start=[FLAT_X * MM, CHORD_H * MM], end=[FLAT_X * MM, -CHORD_H * MM])  # CCW major arc
     chord = await call("cad_sketch_line", elementId=elem, sessionId=sid,
@@ -102,14 +112,8 @@ async def main():
     await call("cad_sketch_constrain", elementId=elem, sessionId=sid, type="vertical", a=lid)
     await call("cad_sketch_dimension", elementId=elem, sessionId=sid, kind="radius",
                entity=aid, value="#bore/2")
-    await call("cad_sketch_dimension", elementId=elem, sessionId=sid, kind="distance",
-               entity=f"{aid}.center", entity2=f"{lid}.start", value="#flat_x", direction="horizontal")
-    # NOTE: this D-bore sketch regenerates with a benign WARNING — geometry is correct and the
-    # sketch is fully defined (dof 0). CONFIRMED INHERENT, not a constraint-choice issue: after
-    # fixing SketchSession.symmetric() (it now emits MIRROR, live-verified), the textbook
-    # explicit-symmetry construction (mirror the chord across a construction X-axis) was tested
-    # live and warns IDENTICALLY. So it's an Onshape quirk of the major-arc + chord D-profile that
-    # reconstraining can't clear — harmless to the part (correct geometry, fully defined).
+    await call("cad_sketch_dimension", elementId=elem, sessionId=sid, kind="position",
+               entity=f"{lid}.start", value=["#flat_x", None])   # origin->point horizontal offset
     a2 = await call("cad_sketch_analyze", elementId=elem, sessionId=sid)
     close = await call("cad_sketch_close", elementId=elem, sessionId=sid)
     ext = await call("cad_extrude", elementId=elem, sketchFeatureId=close["sketchFeatureId"],

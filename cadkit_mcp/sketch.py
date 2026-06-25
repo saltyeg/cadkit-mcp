@@ -370,6 +370,17 @@ class SketchSession:
             self.entities.append({
                 "btType": "BTMSketchPoint-158", "entityId": f"{ns}.center",
                 "x": px * IN, "y": py * IN, "isConstruction": True, "isUserPoint": True})
+            # Pin the pivot. Onshape creates this point as a free user point, so without a
+            # constraint it floats with 2 DOF and drags the whole pattern (live-observed: the
+            # ring is draggable around an unanchored center). Ground it to the origin when it
+            # sits there (the usual case); otherwise FIX it at its construction coords.
+            pivot = f"{ns}.center"
+            if abs(px) < 1e-9 and abs(py) < 1e-9:
+                self.constraints.append(self._con("COINCIDENT", self._id("patgnd"),
+                    [self._extq([ORIGIN_VERTEX], "externalFirst"), self._str(pivot, "localSecond")]))
+            else:
+                self.constraints.append(self._con("FIX", self._id("patfix"),
+                    [self._str(pivot, "localFirst")]))
 
         # the pattern constraint
         def _qi(pid, n): return {"btType": "BTMParameterQuantity-147", "isInteger": True,
@@ -532,13 +543,21 @@ class SketchSession:
             [self._extq([ORIGIN_VERTEX], "externalFirst"), self._str(point, "localSecond")]))
 
     # ---- dimensions (driving) ---------------------------------------------
+    @staticmethod
+    def _value_qty(value, parameter_id: str = "length") -> Dict[str, Any]:
+        """The driving value of EVERY dimension. radius/diameter/distance/length/position all put
+        it in parameterId "length"; Onshape silently ignores the value under any other id (the
+        dim_radius bug: it used "radius", so the arc was never driven — "could not be evaluated").
+        Route all linear dims through this so they can't diverge again; angle passes "angle"."""
+        return {"btType": "BTMParameterQuantity-147", "expression": _expr(value),
+                "parameterId": parameter_id, "isInteger": False}
+
     def dim_length(self, line: str, value):
         self.constraints.append(self._con("LENGTH", self._id("dlen"), [
             self._str(line, "localFirst"),
             {"btType": "BTMParameterEnum-145", "value": "MINIMUM",
              "enumName": "DimensionDirection", "parameterId": "direction"},
-            {"btType": "BTMParameterQuantity-147", "expression": _expr(value),
-             "parameterId": "length", "isInteger": False},
+            self._value_qty(value),
             {"btType": "BTMParameterEnum-145", "value": "ALIGNED",
              "enumName": "DimensionAlignment", "parameterId": "alignment"}]))
 
@@ -551,16 +570,14 @@ class SketchSession:
         return f"{ref}.a" if f"{ref}.a" in ids else ref
 
     def dim_radius(self, circle: str, value):
+        # Value goes through _value_qty -> parameterId "length" (NOT "radius"; live-verified that
+        # "radius" is silently ignored — both #bore/2 AND a direct #bore failed with it).
         self.constraints.append(self._con("RADIUS", self._id("drad"), [
-            self._str(self._radius_target(circle), "localFirst"),
-            {"btType": "BTMParameterQuantity-147", "expression": _expr(value),
-             "parameterId": "radius", "isInteger": False}]))
+            self._str(self._radius_target(circle), "localFirst"), self._value_qty(value)]))
 
     def dim_diameter(self, circle: str, value):
         self.constraints.append(self._con("DIAMETER", self._id("ddia"), [
-            self._str(self._radius_target(circle), "localFirst"),
-            {"btType": "BTMParameterQuantity-147", "expression": _expr(value),
-             "parameterId": "length", "isInteger": False}]))
+            self._str(self._radius_target(circle), "localFirst"), self._value_qty(value)]))
 
     _DIM_DIR = {"horizontal": "HORIZONTAL", "vertical": "VERTICAL"}
 
@@ -578,8 +595,7 @@ class SketchSession:
         params = [self._str(a, "localFirst"), self._str(b, "localSecond")]
         if direction is not None:
             params.append(self._dir_enum(direction))
-        params.append({"btType": "BTMParameterQuantity-147",
-                       "expression": _expr(value), "parameterId": "length"})
+        params.append(self._value_qty(value))
         self.constraints.append(self._con("DISTANCE", self._id("ddist"), params))
 
     def dim_position(self, point: str, x=None, y=None):
@@ -594,26 +610,23 @@ class SketchSession:
         if x is not None:
             self.constraints.append(self._con("DISTANCE", self._id("dposx"), [
                 self._extq([ORIGIN_VERTEX], "externalFirst"), self._str(point, "localSecond"),
-                self._dir_enum("horizontal"),
-                {"btType": "BTMParameterQuantity-147", "expression": _expr(x), "parameterId": "length"}]))
+                self._dir_enum("horizontal"), self._value_qty(x)]))
         if y is not None:
             self.constraints.append(self._con("DISTANCE", self._id("dposy"), [
                 self._extq([ORIGIN_VERTEX], "externalFirst"), self._str(point, "localSecond"),
-                self._dir_enum("vertical"),
-                {"btType": "BTMParameterQuantity-147", "expression": _expr(y), "parameterId": "length"}]))
+                self._dir_enum("vertical"), self._value_qty(y)]))
 
     def dim_angle(self, l1: str, l2: str, value):
         v = value if (isinstance(value, str)) else f"{value} deg"
         self.constraints.append(self._con("ANGLE", self._id("dang"), [
             self._str(l1, "localFirst"), self._str(l2, "localSecond"),
-            {"btType": "BTMParameterQuantity-147", "expression": v, "parameterId": "angle"}]))
+            self._value_qty(v, "angle")]))
 
     def dim_distance_to_plane(self, plane: str, line: str, value):
         """DISTANCE from a default plane (external) to a sketch line — positions the sketch."""
         self.constraints.append(self._con("DISTANCE", self._id("ddist"), [
             self._extq([PLANES[plane]], "externalFirst"),
-            self._str(line, "localSecond"),
-            {"btType": "BTMParameterQuantity-147", "expression": _expr(value), "parameterId": "length"}]))
+            self._str(line, "localSecond"), self._value_qty(value)]))
 
     # ---- diagnostics -------------------------------------------------------
     _DIM_TYPES = {"LENGTH", "DISTANCE", "RADIUS", "DIAMETER", "ANGLE"}
