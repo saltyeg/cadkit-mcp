@@ -502,7 +502,11 @@ class SketchSession:
             [self._str(point, "localFirst"), self._str(line, "localSecond")]))
 
     def symmetric(self, a: str, b: str, symmetry_line: str):
-        self.constraints.append(self._con("SYMMETRIC", self._id("sym"),
+        # Onshape has NO "SYMMETRIC" constraintType — symmetry about a line IS the MIRROR
+        # constraint (the same one add_mirror emits, live-verified). Emitting "SYMMETRIC"
+        # 400s with BTWeirdStringValueException: the constraintType enum can't deserialize.
+        # Same param shape as the mirror constraint: two entities + the `local` axis line.
+        self.constraints.append(self._con("MIRROR", self._id("sym"),
             [self._str(a, "localFirst"), self._str(b, "localSecond"),
              self._str(symmetry_line, "local")]))
 
@@ -641,7 +645,7 @@ class SketchSession:
     # Nominal DOF a constraint removes. Approximate (rank under coupling/redundancy
     # isn't captured) — the *floored* total is the verdict; per-entity hints are advisory.
     _REMOVE = {
-        "COINCIDENT": 2, "CONCENTRIC": 2, "MIDPOINT": 2, "SYMMETRIC": 2,
+        "COINCIDENT": 2, "CONCENTRIC": 2, "MIDPOINT": 2, "MIRROR": 2,
         "HORIZONTAL": 1, "VERTICAL": 1, "PARALLEL": 1, "PERPENDICULAR": 1,
         "TANGENT": 1, "EQUAL": 1, "PIERCE": 1,
         "LENGTH": 1, "DISTANCE": 1, "RADIUS": 1, "DIAMETER": 1, "ANGLE": 1,

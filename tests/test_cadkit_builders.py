@@ -358,6 +358,20 @@ def test_add_mirror_reflects_lines_across_axis_and_links_with_mirror_constraint(
     assert vals == [ln, copy, axis]
 
 
+def test_symmetric_constraint_emits_mirror_type_not_invalid_symmetric():
+    # Regression: symmetric() used to emit constraintType "SYMMETRIC", which Onshape rejects with
+    # a 400 (BTWeirdStringValueException) — there is no such enum; symmetry IS the MIRROR type.
+    s = _session()
+    a = s.add_point((1, 1)); b = s.add_point((-1, 1))
+    axis = s.add_line((0, 0), (0, 1), construction=True)
+    s.constrain("symmetric", a, b, axis)
+    con = s.constraints[-1]
+    assert con["constraintType"] == "MIRROR"   # NOT "SYMMETRIC"
+    vals = {p["parameterId"]: p["value"] for p in con["parameters"]
+            if p["btType"].startswith("BTMParameterString")}
+    assert vals == {"localFirst": a, "localSecond": b, "local": axis}
+
+
 def test_add_mirror_rejects_non_line_entity():
     import pytest
     s = _session()

@@ -13,7 +13,8 @@ Part (axis = Z; cadkit Top=world XY, Right=YZ normal +X — verified via evPlane
   - D-bore: Ø#bore with a flat, across-flats #flat (flat plane at #flat_x from axis), REMOVE thru
             (flat located by a point-to-POINT horizontal dim — point-to-LINE is redundant with
              VERTICAL and regenerates WARNING)
-  - mount : 4 × Ø#mount holes on a Ø#bcd circle, REMOVE thru
+  - mount : 4 × Ø#mount holes on a Ø#bcd circle, clocked 45° (so none sits on the +X set-screw
+            axis), REMOVE thru
   - screw : Ø#setdia radial set screw on the Right plane, +X onto the flat, REMOVE thru the wall
 Expect: 1 solid; bore is a D (not a full circle); 4 holes ride the #bcd circle; a radial
 set-screw hole on the +X side reaching the bore.
@@ -120,14 +121,19 @@ async def main():
                type="ground_origin", a=f"{con['entityId']}.center")
     await call("cad_sketch_dimension", elementId=elem, sessionId=sid, kind="diameter",
                entity=con["entityId"], value="#bcd")
+    # Clock the seed to 45° (NOT on the X axis) so no hole lands on the set-screw axis (+X) —
+    # at 0° the (bcd/2, 0) hole and the radial set screw collide. With 4 holes the ring then
+    # sits at 45/135/225/315, clearing the screw.
     seed = await call("cad_sketch_circle", elementId=elem, sessionId=sid,
-                      center=[BCD / 2 * MM, 0.0], radius=MOUNT / 2 * MM)
+                      center=[BCD / 2 * math.cos(math.radians(45)) * MM,
+                              BCD / 2 * math.sin(math.radians(45)) * MM], radius=MOUNT / 2 * MM)
     await call("cad_sketch_dimension", elementId=elem, sessionId=sid, kind="diameter",
                entity=seed["entityId"], value="#mount")
     await call("cad_sketch_constrain", elementId=elem, sessionId=sid, type="coincident",
                a=f"{seed['entityId']}.center", b=con["entityId"])         # seed ON the #bcd circle
     await call("cad_sketch_dimension", elementId=elem, sessionId=sid, kind="position",
-               entity=f"{seed['entityId']}.center", value=[None, "0 mm"])  # pin seed on the X axis
+               entity=f"{seed['entityId']}.center",
+               value=[None, "#bcd/2 * sin(45 deg)"])  # on-circle + this y-height -> exactly 45°
     await call("cad_sketch_pattern", elementId=elem, sessionId=sid,
                entityIds=[seed["entityId"]], kind="circular", count=NBOLTS,
                center=[0.0, 0.0], angle=360.0 / NBOLTS)
