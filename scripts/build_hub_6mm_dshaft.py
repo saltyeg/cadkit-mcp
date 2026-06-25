@@ -100,12 +100,12 @@ async def main():
                entity=aid, value="#bore/2")
     await call("cad_sketch_dimension", elementId=elem, sessionId=sid, kind="distance",
                entity=f"{aid}.center", entity2=f"{lid}.start", value="#flat_x", direction="horizontal")
-    # NOTE: this D-bore sketch regenerates with a benign WARNING. Geometry is correct and the
-    # sketch is fully defined (removing any constraint under-defines it, so there's no truly
-    # redundant constraint) — it's an Onshape quirk for a symmetric center-arc + chord D-profile.
-    # The textbook clean fix (mirror the chord across a construction X-axis with a SYMMETRIC
-    # constraint) is currently blocked by a cadkit bug: SketchSession.symmetric() emits invalid
-    # JSON (Onshape 400 BTWeirdStringValueException). Tracked as a follow-up; does not affect the part.
+    # NOTE: this D-bore sketch regenerates with a benign WARNING — geometry is correct and the
+    # sketch is fully defined (dof 0). CONFIRMED INHERENT, not a constraint-choice issue: after
+    # fixing SketchSession.symmetric() (it now emits MIRROR, live-verified), the textbook
+    # explicit-symmetry construction (mirror the chord across a construction X-axis) was tested
+    # live and warns IDENTICALLY. So it's an Onshape quirk of the major-arc + chord D-profile that
+    # reconstraining can't clear — harmless to the part (correct geometry, fully defined).
     a2 = await call("cad_sketch_analyze", elementId=elem, sessionId=sid)
     close = await call("cad_sketch_close", elementId=elem, sessionId=sid)
     ext = await call("cad_extrude", elementId=elem, sketchFeatureId=close["sketchFeatureId"],
