@@ -23,6 +23,10 @@ Defaults: 6 mm D-shaft, 16 mm OD, 12 mm long, 10 mm bolt circle, 4 × M3-clearan
 
 Budget: ~19 successful API calls. Fresh part studio in the existing test doc.
 Run ONCE: on any non-OK status, read the per-step output — do not blind-retry.
+
+Live-verified 2026-06-25 (element c14d49231a2e152eb505698b): 1 solid, all features OK except the
+benign D-bore WARNING; holes clocked 45° clear the set screw (volume 0.10144 in^3, lower than the
+colliding 0°-hole build's 0.10264 because the screw and a hole no longer overlap).
 """
 import asyncio
 import json
