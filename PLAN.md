@@ -116,9 +116,9 @@ bodies), and a cylindrical face works as a circular-pattern axis for concentric 
 OAuth2 is the architectural prerequisite and is now in place. The remaining work is a *product*
 decision, not a code task — track it here so it isn't lost. See the quota escape-hatches memory.
 
-11. **Confirm the actual quota tier.** Live `sessioninfo` reports `planGroup: EDU Educator`, not
-    the student tier the 2,500/yr assumption is based on — verify the real annual ceiling with
-    Onshape before sizing anything.
+11. **Confirm the actual quota tier** — ✅ *confirmed.* The `EDU Educator` plan's ceiling is the
+    same **2,500 successful calls/user/year** the discipline already assumes (the usage dashboard
+    reads `N/2500`). No re-sizing needed; the offline-first discipline stands as-is.
 12. **App Store publication** (only if cadkit becomes a public product). A *private* OAuth app's
     calls still count against the quota — the exemption requires publishing. Gated on the full
     Launch Checklist (developer agreement, ≥5 beta testers, Onshape QA, store listing, support
