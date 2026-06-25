@@ -57,7 +57,7 @@ bodies), and a cylindrical face works as a circular-pattern axis for concentric 
      Using `count-1` regenerates WARNING when `count-1 != 2` (caught live: circular count 4).
    Live-verified (`scripts/smoke_sketch_pattern_linked.py`): circular ×4 + linear ×3 both close OK
    (not WARNING) and extrude to 4+3=7 solids. Still TODO: count/spacing as `#variables`, lines/arcs.
-2. **Hole/pattern centers as variables** — ✅ *primitive shipped (offline); one live smoke pending.*
+2. **Hole/pattern centers as variables** — ✅ *shipped & live-verified.*
    Root finding: a center moves with a variable only if a *dimension* references it, and the only
    missing primitive was an axis-projected (horizontal/vertical) distance — point-to-point
    `dim_distance` was Euclidean, so it couldn't pin x and y to separate `#variables`. Added:
@@ -69,11 +69,11 @@ bodies), and a cylindrical face works as a circular-pattern axis for concentric 
    construction circle; the primitives compose. Counts: **feature** patterns already accept a
    `#variable` count (`cad_pattern` schema `integer|string` → `instanceCount`); **sketch** patterns
    can't (they enumerate each instance), documented. 7 offline builder tests.
-   **Live smoke pending** (`scripts/smoke_variable_center.py`, ~8 calls): the only offline-unprovable
-   bits — that a directional DISTANCE from the *external* origin vertex regenerates OK, and that
-   editing `#hx` actually slides the solid. **Still TODO (verify):** point-on-curve coincident (seed
-   center *on* the `#bcd` construction circle) for the polar bolt-circle recipe — plausibly already
-   works via plain COINCIDENT(point, curve), unconfirmed.
+   **Live-verified** (`scripts/smoke_variable_center.py`, ~13 calls, 2026-06-25): a directional
+   DISTANCE from the *external* origin vertex regenerates OK and editing `#hx` slid the peg from its
+   nominal x=2 to **x=3** (the dim drives, it isn't decorative); and **point-on-curve coincident is
+   confirmed** — `COINCIDENT(point, curve)` put four seeds exactly on the `#bcd`=3 (r1.5) circle at
+   0/90/180/270°, so the polar bolt-circle recipe composes with zero bespoke feature.
 3. **Auto-dimension-to-fully-defined helper** — ✅ *shipped (offline); no oracle exists.*
    `cad_sketch_analyze(apply=false)` reports `{dof, grounded, fullyDefined, hints, applied}` with
    **zero API calls** — it reasons over the session's in-memory entities + constraints. `dof` is an
