@@ -63,6 +63,22 @@ cad_sketch_close(require_well_formed=true)              # refuses if under-defin
 cad_extrude(sketchFeatureId=sk, depth="#thick", operation="NEW")
 ```
 
+### Variable-driven centers (no bolt-circle macro needed)
+
+A center moves with a variable only if a *dimension* references that variable. To place a hole at
+`(#hx, #hy)`, dimension its center from the origin:
+
+```
+cir = cad_sketch_circle(center=[2, 1], radius=0.25)    # nominal spot; the dims drive it
+cad_sketch_dimension(kind="diameter", entity=cir, value="#bore")
+cad_sketch_dimension(kind="position", entity=cir+".center", value=["#hx", "#hy"])  # H + V dims
+```
+
+`kind="position"` emits a horizontal and a vertical distance from the origin (`null` skips an axis);
+`kind="distance"` with `direction="horizontal"|"vertical"` does the same between any two entities.
+A **bolt circle** is then just a *circular pattern* (`cad_sketch_pattern` / `cad_pattern`) of one
+hole whose seed sits on a construction circle dimensioned to `#bcd` — no dedicated feature required.
+
 ## Install
 
 Both servers live in this one repo and share the same Onshape client.

@@ -30,7 +30,7 @@ The parametric core, the P1–P3 feature set, and OAuth are done. Summary of cap
   `cadkit-auth` CLI). Pluggable async auth provider on `OnshapeClient`; server prefers a stored
   OAuth token with silent refresh + rotation. **Live-verified** end-to-end (token round-trip via
   `/api/users/sessioninfo`, all three scopes granted).
-- **Quality** — 567 offline tests; quota instrumentation (`cad_api_calls`); on-demand live
+- **Quality** — 574 offline tests; quota instrumentation (`cad_api_calls`); on-demand live
   smokes in `scripts/`; two full integration builds (`build_example_bracket.py`,
   `build_example_flange.py`).
 
@@ -57,9 +57,23 @@ bodies), and a cylindrical face works as a circular-pattern axis for concentric 
      Using `count-1` regenerates WARNING when `count-1 != 2` (caught live: circular count 4).
    Live-verified (`scripts/smoke_sketch_pattern_linked.py`): circular ×4 + linear ×3 both close OK
    (not WARNING) and extrude to 4+3=7 solids. Still TODO: count/spacing as `#variables`, lines/arcs.
-2. **Hole/pattern centers as variables.** Seed bolt sits at a literal BCD coordinate and counts
-   are literals (flange finding) — editing a bolt-circle variable won't move them. Thread
-   `#variable`/expressions into center placement and pattern counts.
+2. **Hole/pattern centers as variables** — ✅ *primitive shipped (offline); one live smoke pending.*
+   Root finding: a center moves with a variable only if a *dimension* references it, and the only
+   missing primitive was an axis-projected (horizontal/vertical) distance — point-to-point
+   `dim_distance` was Euclidean, so it couldn't pin x and y to separate `#variables`. Added:
+   `dim_distance(..., direction="horizontal"|"vertical")` (a `DimensionDirection` enum on the
+   DISTANCE constraint) and `dim_position(point, x, y)` — the cartesian center primitive, exposed as
+   `cad_sketch_dimension(kind="position", value=[x,y])` (origin-relative H+V dims, either a
+   `#variable`; `null` skips an axis). **No `cad_bolt_circle` macro** — a bolt circle is just a
+   *circular pattern* (already shipped) of a hole whose seed sits on a `#bcd`-dimensioned
+   construction circle; the primitives compose. Counts: **feature** patterns already accept a
+   `#variable` count (`cad_pattern` schema `integer|string` → `instanceCount`); **sketch** patterns
+   can't (they enumerate each instance), documented. 7 offline builder tests.
+   **Live smoke pending** (`scripts/smoke_variable_center.py`, ~8 calls): the only offline-unprovable
+   bits — that a directional DISTANCE from the *external* origin vertex regenerates OK, and that
+   editing `#hx` actually slides the solid. **Still TODO (verify):** point-on-curve coincident (seed
+   center *on* the `#bcd` construction circle) for the polar bolt-circle recipe — plausibly already
+   works via plain COINCIDENT(point, curve), unconfirmed.
 3. **Auto-dimension-to-fully-defined helper** — ✅ *shipped (offline); no oracle exists.*
    `cad_sketch_analyze(apply=false)` reports `{dof, grounded, fullyDefined, hints, applied}` with
    **zero API calls** — it reasons over the session's in-memory entities + constraints. `dof` is an

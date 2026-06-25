@@ -558,10 +558,45 @@ class SketchSession:
             {"btType": "BTMParameterQuantity-147", "expression": _expr(value),
              "parameterId": "length", "isInteger": False}]))
 
-    def dim_distance(self, a: str, b: str, value):
-        self.constraints.append(self._con("DISTANCE", self._id("ddist"), [
-            self._str(a, "localFirst"), self._str(b, "localSecond"),
-            {"btType": "BTMParameterQuantity-147", "expression": _expr(value), "parameterId": "length"}]))
+    _DIM_DIR = {"horizontal": "HORIZONTAL", "vertical": "VERTICAL"}
+
+    def _dir_enum(self, direction: str) -> Dict[str, Any]:
+        d = self._DIM_DIR.get(direction)
+        if d is None:
+            raise ValueError(f"direction must be 'horizontal' or 'vertical', got {direction!r}")
+        return {"btType": "BTMParameterEnum-145", "value": d,
+                "enumName": "DimensionDirection", "parameterId": "direction"}
+
+    def dim_distance(self, a: str, b: str, value, direction: Optional[str] = None):
+        """Distance between two refs. direction=None is the straight-line (aligned) distance;
+        'horizontal'/'vertical' measures only the x / y component (an axis-projected distance) —
+        which is how you pin a single coordinate to a #variable."""
+        params = [self._str(a, "localFirst"), self._str(b, "localSecond")]
+        if direction is not None:
+            params.append(self._dir_enum(direction))
+        params.append({"btType": "BTMParameterQuantity-147",
+                       "expression": _expr(value), "parameterId": "length"})
+        self.constraints.append(self._con("DISTANCE", self._id("ddist"), params))
+
+    def dim_position(self, point: str, x=None, y=None):
+        """Place a sketch point at (x, y) relative to the part-studio origin, parametrically —
+        the cartesian counterpart to grounding. Emits a horizontal DISTANCE (origin→point)=x
+        and/or a vertical DISTANCE=y, each of which may be a number or a #variable/expression.
+        Drive only the axis you pass (None skips it). The sign follows the point's current
+        nominal placement — draw the entity on the side you want, then dimension. This is *the*
+        variable-driven center primitive: e.g. a hole at (#hx, #hy) moves when those vars change."""
+        if x is None and y is None:
+            raise ValueError("dim_position needs x and/or y")
+        if x is not None:
+            self.constraints.append(self._con("DISTANCE", self._id("dposx"), [
+                self._extq([ORIGIN_VERTEX], "externalFirst"), self._str(point, "localSecond"),
+                self._dir_enum("horizontal"),
+                {"btType": "BTMParameterQuantity-147", "expression": _expr(x), "parameterId": "length"}]))
+        if y is not None:
+            self.constraints.append(self._con("DISTANCE", self._id("dposy"), [
+                self._extq([ORIGIN_VERTEX], "externalFirst"), self._str(point, "localSecond"),
+                self._dir_enum("vertical"),
+                {"btType": "BTMParameterQuantity-147", "expression": _expr(y), "parameterId": "length"}]))
 
     def dim_angle(self, l1: str, l2: str, value):
         v = value if (isinstance(value, str)) else f"{value} deg"

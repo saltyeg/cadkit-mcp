@@ -453,11 +453,15 @@ async def list_tools() -> List[Tool]:
                           "a": {"type": "string"}, "b": {"type": "string"}, "c": {"type": "string"}},
                           "required": ["sessionId", "type", "a"]}),
         Tool(name="cad_sketch_dimension", description="Add a driving dimension. kind: length (line), radius/diameter "
-             "(circle), distance (entity+entity2), angle (line+line, value in degrees). value is inches (number) or an "
-             "expression/#variable (e.g. '#base_len', '60 mm').",
+             "(circle), distance (entity+entity2; add direction='horizontal'|'vertical' to measure only the x/y "
+             "component), angle (line+line, value in degrees), position (place a point at value=[x,y] relative to the "
+             "origin — the variable-driven center primitive; either component may be a #variable, use null to skip an "
+             "axis). value is inches (number) or an expression/#variable (e.g. '#base_len', '60 mm').",
              inputSchema={"type": "object", "properties": {"sessionId": {"type": "string"},
-                          "kind": {"type": "string", "enum": ["length", "radius", "diameter", "distance", "angle"]},
-                          "entity": {"type": "string"}, "entity2": {"type": "string"}, "value": {}},
+                          "kind": {"type": "string",
+                                   "enum": ["length", "radius", "diameter", "distance", "angle", "position"]},
+                          "entity": {"type": "string"}, "entity2": {"type": "string"},
+                          "direction": {"type": "string", "enum": ["horizontal", "vertical"]}, "value": {}},
                           "required": ["sessionId", "kind", "entity", "value"]}),
         Tool(name="cad_sketch_analyze", description="Report remaining degrees of freedom and what's under-constrained "
              "(offline — no API call). Returns {dof, grounded, fullyDefined, hints, applied}. Set apply=true to "
@@ -673,9 +677,13 @@ async def dispatch(name: str, arguments: Dict[str, Any]) -> List[TextContent]:
                 return _txt("ok")
             if name == "cad_sketch_dimension":
                 k = a["kind"]; e = a["entity"]; v = a["value"]; e2 = a.get("entity2")
+                vx = v[0] if isinstance(v, (list, tuple)) and len(v) > 0 else None
+                vy = v[1] if isinstance(v, (list, tuple)) and len(v) > 1 else None
                 {"length": lambda: s.dim_length(e, v), "radius": lambda: s.dim_radius(e, v),
-                 "diameter": lambda: s.dim_diameter(e, v), "distance": lambda: s.dim_distance(e, e2, v),
-                 "angle": lambda: s.dim_angle(e, e2, v)}[k]()
+                 "diameter": lambda: s.dim_diameter(e, v),
+                 "distance": lambda: s.dim_distance(e, e2, v, a.get("direction")),
+                 "angle": lambda: s.dim_angle(e, e2, v),
+                 "position": lambda: s.dim_position(e, vx, vy)}[k]()
                 return _txt("ok")
             if name == "cad_sketch_analyze":
                 # Offline DOF report / auto-dimension — no API call.

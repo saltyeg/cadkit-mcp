@@ -4,8 +4,11 @@ These run with **zero API calls** (the expensive, quota-bounded behaviors live i
 on-demand live smoke test, not here). They guard the class of bug that actually cost a
 debugging session: a wrong/hidden parameterId that produces plausible-but-dead output.
 """
+import json
 import pathlib
 import sys
+
+import pytest
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -411,6 +414,85 @@ def test_dim_length_accepts_variable_expression():
     s = _session(); l = s.add_line((0, 0), (2, 0)); s.dim_length(l, "#leg_len")
     q = [p for p in s.constraints[-1]["parameters"] if p.get("parameterId") == "length"][0]
     assert q["expression"] == "#leg_len"
+
+
+# ---- directional distance + variable-driven center placement (P4-2) -------
+def _dir_enum(con):
+    return next((p for p in con["parameters"] if p.get("parameterId") == "direction"), None)
+
+
+def test_dim_distance_plain_has_no_direction_enum():
+    s = _session(); a = s.add_point((0, 0)); b = s.add_point((2, 0))
+    s.dim_distance(a, b, 2.0)
+    con = s.constraints[-1]
+    assert con["constraintType"] == "DISTANCE" and _dir_enum(con) is None
+
+
+def test_dim_distance_horizontal_emits_dimension_direction_enum():
+    s = _session(); a = s.add_point((0, 0)); b = s.add_point((2, 1))
+    s.dim_distance(a, b, "#dx", direction="horizontal")
+    d = _dir_enum(s.constraints[-1])
+    assert d["enumName"] == "DimensionDirection" and d["value"] == "HORIZONTAL"
+    q = [p for p in s.constraints[-1]["parameters"] if p.get("parameterId") == "length"][0]
+    assert q["expression"] == "#dx"
+
+
+def test_dim_distance_rejects_unknown_direction():
+    s = _session(); a = s.add_point((0, 0)); b = s.add_point((2, 0))
+    with pytest.raises(ValueError):
+        s.dim_distance(a, b, 1.0, direction="diagonal")
+
+
+def test_dim_position_pins_point_to_origin_on_both_axes_with_variables():
+    s = _session(); p = s.add_point((2, 3))
+    s.dim_position(p, x="#hx", y="#hy")
+    cons = s.constraints[-2:]
+    dirs = {_dir_enum(c)["value"] for c in cons}
+    assert dirs == {"HORIZONTAL", "VERTICAL"}
+    for c in cons:
+        # measured FROM the part-studio origin vertex (external) TO the local point
+        q0 = c["parameters"][0]
+        assert q0["btType"].startswith("BTMParameterQueryList")
+        assert ORIGIN_VERTEX in q0["queries"][0]["deterministicIds"]
+        assert c["parameters"][1]["value"] == p
+    exprs = {[p2 for p2 in c["parameters"] if p2.get("parameterId") == "length"][0]["expression"]
+             for c in cons}
+    assert exprs == {"#hx", "#hy"}
+
+
+def test_dim_position_single_axis_emits_one_constraint_and_counts_as_dimension():
+    s = _session(); p = s.add_point((2, 0))
+    n = len(s.constraints)
+    s.dim_position(p, x=2.0)               # y omitted -> only the horizontal pin
+    assert len(s.constraints) == n + 1
+    assert _dir_enum(s.constraints[-1])["value"] == "HORIZONTAL"
+    assert s.diagnostics()["dimensions"] == 1   # DISTANCE is a driving dimension
+
+
+def test_dim_position_requires_at_least_one_axis():
+    s = _session(); p = s.add_point((0, 0))
+    with pytest.raises(ValueError):
+        s.dim_position(p)
+
+
+def test_dispatch_position_dimension_places_a_circle_center_by_variables():
+    import asyncio
+    async def go():
+        b = await S.dispatch("cad_sketch_begin",
+                             {"documentId": "d", "workspaceId": "w", "elementId": "e", "plane": "Top"})
+        sid = json.loads(b[0].text)["sessionId"]
+        cir = json.loads((await S.dispatch("cad_sketch_circle",
+                          {"sessionId": sid, "center": [1, 1], "radius": 0.25}))[0].text)["entityId"]
+        await S.dispatch("cad_sketch_dimension",
+                         {"sessionId": sid, "kind": "diameter", "entity": cir, "value": 0.5})
+        out = await S.dispatch("cad_sketch_dimension",
+                         {"sessionId": sid, "kind": "position", "entity": f"{cir}.center",
+                          "value": ["#hx", "#hy"]})
+        assert out[0].text == "ok"
+        s = S.SESSIONS[sid]
+        pos = [c for c in s.constraints if c["entityId"].startswith("dpos")]
+        assert {_dir_enum(c)["value"] for c in pos} == {"HORIZONTAL", "VERTICAL"}
+    asyncio.run(go())
 
 
 # ---- server JSON builders (pure functions) --------------------------------
